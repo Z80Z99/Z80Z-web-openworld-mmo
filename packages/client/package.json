@@ -1,0 +1,21 @@
+{
+  "name": "@mmo/client",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/main.ts",
+  "types": "src/main.ts",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "dev": "vite",
+    "test": "vitest run --reporter verbose"
+  },
+  "dependencies": {
+    "@mmo/shared": "*",
+    "pixi.js": "^8.20.0",
+    "colyseus.js": "^0.15.28"
+  },
+  "devDependencies": {
+    "vite": "^6.3.0",
+    "vitest": "^3.1.0"
+  }
+}

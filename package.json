@@ -1,0 +1,21 @@
+{
+  "name": "open-world-mmo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/client"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "vitest run --reporter verbose",
+    "dev": "npm run dev -w packages/client",
+    "start": "npm run start -w packages/server"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  }
+}

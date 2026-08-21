@@ -1,0 +1,513 @@
+import { Application, Container } from "pixi.js";
+import { MOVE_SPEED, CHUNK_SIZE } from "@mmo/shared";
+
+import { Camera, TileRenderer, EntityRenderer, MobRenderer, TILE_PX } from "./renderer/index.js";
+import { NetworkManager } from "./network/index.js";
+import { InputManager, TouchControls } from "./input/index.js";
+import type { InputVector } from "./input/index.js";
+import { GameState } from "./game/index.js";
+import { HUD, CombatUI, IdleUI, MobileUI, QuestUI, CraftingUI, ShopUI, TradeUI, MountUI, TitleUI, TutorialOverlay, ResponsiveLayout } from "./ui/index.js";
+
+/* ── Configuration ── */
+const SEED = 42;
+const BACKGROUND_COLOR = 0x1a1a2e;
+const SERVER_URL = "ws://localhost:2567";
+
+/* ── Bootstrap ── */
+async function main() {
+  // PixiJS application
+  const app = new Application();
+  await app.init({
+    background: BACKGROUND_COLOR,
+    resizeTo: window,
+    antialias: false,
+    resolution: window.devicePixelRatio || 1,
+    autoDensity: true,
+  });
+
+  const container = document.getElementById("game-container");
+  if (!container) throw new Error("Missing #game-container element");
+  container.appendChild(app.canvas);
+
+  // Game state
+  const gameState = new GameState(SEED);
+
+  // World stage (all game world rendering happens here)
+  const worldStage = new Container();
+  app.stage.addChild(worldStage);
+
+  // Camera
+  const camera = new Camera(
+    worldStage,
+    app.screen.width,
+    app.screen.height,
+    0.1,
+  );
+
+  // Tile renderer
+  const tileRenderer = new TileRenderer(worldStage, camera);
+
+  // Entity renderer (players)
+  const entityRenderer = new EntityRenderer(worldStage, gameState);
+
+  // Mob renderer
+  const mobRenderer = new MobRenderer(worldStage);
+
+  // Input — use TouchControls on mobile, InputManager on desktop
+  const isMobile = navigator.maxTouchPoints > 0;
+  let input: InputManager | TouchControls;
+
+  let mobileUI: MobileUI | null = null;
+
+  if (isMobile) {
+    const touchControls = new TouchControls(document.body);
+    input = touchControls;
+
+    // Mobile HUD (separate from desktop HUD)
+    mobileUI = new MobileUI(container);
+    mobileUI.onChatToggle(() => {
+      chatOpen = !chatOpen;
+      hud.toggleChat(chatOpen);
+    });
+
+    // Wire action buttons
+    touchControls.onAction((action) => {
+      switch (action) {
+        case "attack": {
+          // Auto-target nearest mob if none targeted
+          if (!gameState.targetedMobId) {
+            const mobs = Array.from(gameState.mobs.values());
+            if (mobs.length > 0) {
+              const local = gameState.localPlayer;
+              if (local) {
+                let nearest = mobs[0];
+                let nearestDist = Infinity;
+                for (const mob of mobs) {
+                  const dx = mob.x - local.x;
+                  const dy = mob.y - local.y;
+                  const dist = dx * dx + dy * dy;
+                  if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearest = mob;
+                  }
+                }
+                gameState.targetedMobId = nearest.id;
+              }
+            }
+          }
+          if (gameState.targetedMobId) {
+            network.sendAttack(gameState.targetedMobId);
+          }
+          break;
+        }
+        case "interact":
+          break;
+        case "mount":
+          // Toggle mount/dismount
+          network.sendMountAction("mount", "default_mount");
+          break;
+        case "inventory":
+          break;
+      }
+    });
+  } else {
+    input = new InputManager(document.body);
+  }
+
+  let chatOpen = false;
+
+  // HUD (DOM overlay)
+  const hud = new HUD(container);
+  hud.onChatSubmit((msg) => {
+    network.sendChat(msg);
+  });
+
+  // Combat UI (DOM overlay)
+  const combatUI = new CombatUI(container);
+
+  // Idle reward UI (DOM overlay)
+  const idleUI = new IdleUI(container);
+  idleUI.onClaim(() => {
+    network.sendIdleClaim();
+  });
+
+  // Quest tracker UI (DOM overlay)
+  const questUI = new QuestUI(container);
+
+  // Crafting menu UI (DOM overlay)
+  const craftingUI = new CraftingUI(container);
+  craftingUI.setCraftHandler((recipeId) => {
+    network.sendCraftRequest(recipeId);
+  });
+
+  // Shop UI (DOM overlay)
+  const shopUI = new ShopUI(container);
+  shopUI.onBuy((shopId, itemId, count) => {
+    network.sendShopBuy(shopId, itemId, count);
+  });
+  shopUI.onSell((itemId, count) => {
+    network.sendShopSell(itemId, count);
+  });
+
+  // Trade UI (DOM overlay)
+  const tradeUI = new TradeUI(container);
+  tradeUI.onConfirm((tradeId) => {
+    network.sendTradeConfirm(tradeId);
+  });
+  tradeUI.onCancel((tradeId) => {
+    network.sendTradeCancel(tradeId);
+  });
+
+  // Mount indicator UI (DOM overlay)
+  const mountUI = new MountUI(container);
+  mountUI.onMountAction((action, mountId) => {
+    if (action === "dismount") {
+      network.sendMountAction("dismount", mountId);
+    }
+  });
+
+  // Title display UI (DOM overlay)
+  const titleUI = new TitleUI(container);
+
+  // Tutorial overlay
+  const tutorialOverlay = new TutorialOverlay(container);
+
+  // Responsive layout (auto-detects breakpoints)
+  const responsive = new ResponsiveLayout();
+  responsive.onBreakpointChange((_bp) => {});
+  responsive.init();
+
+  // FPS tracking
+  let frameCount = 0;
+  let lastFpsTime = performance.now();
+
+  // Damage number counter for unique IDs
+  let damageCounter = 0;
+
+  /* ── Network ── */
+  const network = new NetworkManager(SERVER_URL, gameState, {
+    onRoomJoin(roomId) {
+      console.log(`[net] Joined room ${roomId}`);
+    },
+    onLocalPlayerReady(playerId, state) {
+      const cx = Math.floor(state.x / CHUNK_SIZE);
+      const cy = Math.floor(state.y / CHUNK_SIZE);
+      loadChunksAround(cx, cy, 2);
+      camera.snapTo(state.x * TILE_PX, state.y * TILE_PX);
+    },
+    onPlayerMove(_playerId, _state) {
+      // Server reconciliation is handled by GameState
+    },
+    onTileUpdate(_chunkKey, _tiles) {
+      // Server tile data would override prediction if needed
+    },
+    onEntityAdd(_entityId, _entity) {},
+    onEntityUpdate(entityId, entity) {
+      // Update mob renderer with new state
+      const mob = gameState.mobs.get(entityId);
+      if (mob) {
+        mobRenderer.updateMobState(entityId, {
+          ...mob,
+          x: entity.x,
+          y: entity.y,
+          health: entity.health,
+        });
+      }
+    },
+    onEntityRemove(entityId) {
+      mobRenderer.removeMob(entityId);
+    },
+    onCombatEvent(event) {
+      // Handle combat events from server
+      if (event.type === "damage_dealt" || event.type === "player_damaged") {
+        const targetId = event.targetId;
+        const isPlayerDamage = event.type === "player_damaged";
+
+        let screenPos: { x: number; y: number } | null = null;
+
+        if (isPlayerDamage) {
+          // Damage to player — show at player position
+          const local = gameState.localPlayer;
+          if (local) {
+            screenPos = {
+              x: local.x * 16 - camera.x + camera.viewportWidth / 2,
+              y: local.y * 16 - camera.y + camera.viewportHeight / 2,
+            };
+          }
+        } else {
+          // Damage to mob — show at mob position
+          screenPos = mobRenderer.getMobScreenPosition(targetId);
+          if (screenPos) {
+            // Convert world coords to screen coords
+            screenPos = {
+              x: screenPos.x - camera.x + camera.viewportWidth / 2,
+              y: screenPos.y - camera.y + camera.viewportHeight / 2,
+            };
+          }
+        }
+
+        if (screenPos && event.damage !== undefined) {
+          const prefix = isPlayerDamage ? "-" : "-";
+          combatUI.addDamageNumber(
+            `dmg_${damageCounter++}`,
+            `${prefix}${event.damage}`,
+            screenPos.x,
+            screenPos.y,
+            false,
+          );
+        }
+      }
+
+      if (event.type === "xp_gained" && event.xp) {
+        gameState.xp += event.xp;
+        // Show XP gain as a floating number
+        const local = gameState.localPlayer;
+        if (local) {
+          const screenX = local.x * 16 - camera.x + camera.viewportWidth / 2;
+          const screenY = local.y * 16 - camera.y + camera.viewportHeight / 2 - 20;
+          combatUI.addDamageNumber(
+            `xp_${damageCounter++}`,
+            `+${event.xp} XP`,
+            screenX,
+            screenY,
+            true,
+          );
+        }
+      }
+
+      if (event.type === "mob_killed") {
+        network.sendQuestEvent("kill", event.mobType);
+      }
+    },
+    onChat(sender, content) {
+      hud.addChatMessage(sender, content);
+    },
+    onError(_msg) {},
+    onIdleSummary(summary) {
+      idleUI.show(summary);
+    },
+    onIdleClaimResult(result) {
+      idleUI.hide();
+    },
+    onQuestUpdate(data) {
+      questUI.update(data);
+    },
+    onCraftResult(data) {
+      if (data.success) {
+        network.sendQuestEvent("craft", data.itemId);
+      }
+    },
+    onShopResult(_data) {},
+    onTradeStarted(data) {
+      tradeUI.show({
+        tradeId: data.tradeId,
+        playerName: "",
+        otherPlayerName: data.otherPlayerName,
+        myItems: [],
+        theirItems: [],
+        myConfirmed: false,
+        theirConfirmed: false,
+        status: "pending",
+      });
+    },
+    onTradeUpdate(data) {
+      tradeUI.update({
+        tradeId: data.tradeId,
+        playerName: "",
+        otherPlayerName: "",
+        myItems: data.myItems,
+        theirItems: data.theirItems,
+        myConfirmed: data.myConfirmed,
+        theirConfirmed: data.theirConfirmed,
+        status: data.status,
+      });
+    },
+    onTradeCancelled(_data) {
+      tradeUI.hide();
+    },
+    onTradeComplete(_data) {
+      tradeUI.hide();
+      network.sendQuestEvent("trade");
+    },
+    onTradeError(_error) {},
+    onTitleUpdate(data) {
+      titleUI.update(data);
+    },
+  });
+
+  /* ── Chunk loading ── */
+  const loadedChunks = new Set<string>();
+
+  function loadChunksAround(cx: number, cy: number, radius: number): void {
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const chunkCx = cx + dx;
+        const chunkCy = cy + dy;
+        const key = `${chunkCx},${chunkCy}`;
+        if (loadedChunks.has(key)) continue;
+
+        // Client-side prediction: generate chunk locally
+        const chunk = gameState.predictChunk(chunkCx, chunkCy);
+        tileRenderer.renderChunk(chunk);
+        loadedChunks.add(key);
+      }
+    }
+  }
+
+  /* ── Handle resize ── */
+  window.addEventListener("resize", () => {
+    camera.resize(app.screen.width, app.screen.height);
+  });
+
+  /* ── Keyboard handlers ── */
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !chatOpen) {
+      chatOpen = true;
+      hud.toggleChat(true);
+      e.preventDefault();
+    }
+
+    // Tab key — cycle targeted mob
+    if (e.key === "Tab" && !chatOpen) {
+      e.preventDefault();
+      const mobs = Array.from(gameState.mobs.values());
+      if (mobs.length === 0) {
+        gameState.targetedMobId = null;
+        return;
+      }
+
+      const currentIdx = gameState.targetedMobId
+        ? mobs.findIndex((m) => m.id === gameState.targetedMobId)
+        : -1;
+      const nextIdx = (currentIdx + 1) % mobs.length;
+      gameState.targetedMobId = mobs[nextIdx].id;
+    }
+
+    // Space key — attack targeted mob
+    if (e.key === " " && !chatOpen) {
+      e.preventDefault();
+      if (gameState.targetedMobId) {
+        network.sendAttack(gameState.targetedMobId);
+      }
+    }
+  });
+
+  /* ── Mouse click — target mob ── */
+  app.canvas.addEventListener("click", (e) => {
+    if (chatOpen) return;
+
+    // Convert click to world coords
+    const rect = app.canvas.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    const worldX = (screenX + camera.x - camera.viewportWidth / 2) / 16;
+    const worldY = (screenY + camera.y - camera.viewportHeight / 2) / 16;
+
+    // Check if clicked on a mob
+    const clickedMobId = mobRenderer.getMobAtPosition(worldX, worldY, 1);
+    if (clickedMobId) {
+      gameState.targetedMobId = clickedMobId;
+    } else {
+      gameState.targetedMobId = null;
+    }
+  });
+
+  /* ── Game loop ── */
+  app.ticker.add((ticker) => {
+    const dt = ticker.deltaMS / 1000; // seconds
+
+    // Input
+    if (!chatOpen) {
+      const dir = input.getDirection();
+      if (dir.dx !== 0 || dir.dy !== 0) {
+        // Client-side prediction + server send (handled by MovementManager)
+        network.sendMovement(dir.dx, dir.dy, MOVE_SPEED, dt);
+      }
+    }
+
+    // Smooth interpolation toward server position
+    network.updateMovement(dt);
+
+    // Camera follow local player
+    const local = gameState.localPlayer;
+    if (local) {
+      camera.follow(local.x * TILE_PX, local.y * TILE_PX, dt);
+
+      // Load chunks around player
+      const { cx, cy } = GameState.worldToChunk(local.x, local.y);
+      loadChunksAround(cx, cy, 2);
+    }
+
+    // Update entities (players)
+    entityRenderer.update(camera.getVisibleBounds());
+
+    // Update mob renderer
+    // Set aggro state for mobs near the local player
+    if (local) {
+      for (const [id, mob] of gameState.mobs) {
+        const dx = mob.x - local.x;
+        const dy = mob.y - local.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        // Simple aggro heuristic: mobs within 3 tiles that are moving toward player
+        const isAggro = dist <= 3;
+        mobRenderer.updateMobState(id, { ...mob, isAggro });
+      }
+    }
+    mobRenderer.update(camera.getVisibleBounds());
+
+    // Update combat UI — damage numbers
+    combatUI.update();
+
+    // Update mob health bar for targeted mob
+    if (gameState.targetedMobId) {
+      const mob = gameState.mobs.get(gameState.targetedMobId);
+      if (mob) {
+        const screenPos = mobRenderer.getMobScreenPosition(mob.id);
+        if (screenPos) {
+          combatUI.updateMobHealthBar({
+            mobId: mob.id,
+            name: mob.typeId.charAt(0).toUpperCase() + mob.typeId.slice(1),
+            currentHp: mob.health,
+            maxHp: mob.maxHealth,
+            x: screenPos.x - camera.x + camera.viewportWidth / 2,
+            y: screenPos.y - camera.y + camera.viewportHeight / 2,
+          });
+        }
+      } else {
+        combatUI.updateMobHealthBar(null);
+      }
+    } else {
+      combatUI.updateMobHealthBar(null);
+    }
+
+    // HUD updates
+    if (local) {
+      hud.updateHealth(local.health, local.maxHealth);
+      hud.updatePlayerInfo(local.name, local.level);
+      if (mobileUI) {
+        mobileUI.updateHealth(local.health, local.maxHealth);
+        mobileUI.updatePlayerInfo(local.name, local.level);
+      }
+      combatUI.updateXp(gameState.xp, gameState.xpToNextLevel, local.level);
+    }
+
+    // FPS
+    frameCount++;
+    const now = performance.now();
+    if (now - lastFpsTime >= 1000) {
+      hud.updateFPS(frameCount);
+      frameCount = 0;
+      lastFpsTime = now;
+    }
+  });
+
+  /* ── Connect to server ── */
+  await network.connect();
+
+  // Input poll (attach to ticker for per-frame events)
+  app.ticker.add(() => {
+    input.poll();
+  });
+}
+
+main().catch(console.error);

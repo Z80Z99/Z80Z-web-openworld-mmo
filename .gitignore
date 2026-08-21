@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.codegraph/
+.cache/
+coverage/
+*.tsbuildinfo
+*.pid
+*-load.cjs
+.env
+.env.*
+!.env.example
+*.log
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+.DS_Store
