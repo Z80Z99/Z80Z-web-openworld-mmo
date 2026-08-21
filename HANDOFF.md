@@ -12,6 +12,12 @@ The idle reward claim path was completed end-to-end. Its focused verification pa
 
 The replacement-computer verification repaired the production startup path and completed F2. The real 500-client test passed with 500/500 joins, no join failures, bounded cleanup, and captured latency, CPU, and memory evidence. The server uses 100-client room shards and AOI-filtered state replication.
 
+The game rendering is now fully functional with tiles, players, mobs, HUD, and UI all working correctly.
+
+## Git repository
+
+The repository is initialized with an initial commit (`f695302`). All code is committed.
+
 ## Remaining work
 
 Final verification was paused because the previous computer had insufficient memory. Rerun all four tasks on the new computer; do not rely on old background task IDs or unavailable results.
