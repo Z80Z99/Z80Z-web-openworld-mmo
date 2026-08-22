@@ -1,4 +1,4 @@
-import { Graphics, Container } from "pixi.js";
+import { Graphics, Container, Sprite } from "pixi.js";
 import { TileType, CHUNK_SIZE } from "@mmo/shared";
 import type { Chunk } from "@mmo/shared";
 import type { Camera } from "./Camera.js";
@@ -8,6 +8,7 @@ import {
   findAnimatedTiles,
   type AnimatedTile,
 } from "./TileAnimations.js";
+import { textureManager } from "./TextureManager.js";
 
 // ── Palette ─────────────────────────────────────────────────────────────────
 
@@ -43,13 +44,8 @@ interface ChunkRenderState {
 // ── TileRenderer ────────────────────────────────────────────────────────────
 
 /**
- * Renders terrain tiles from chunk data as colored rectangles.
- *
- * Enhancements over the basic version:
- * - Seeded per-tile color variation (no two adjacent tiles are identical).
- * - Water / DeepWater tiles shimmer via a sin-wave animation.
- * - Sand tiles get a warm color shift.
- * - Forest tiles are darker to hint at canopy depth.
+ * Renders terrain tiles from chunk data.
+ * Uses textures from TextureManager when available, falls back to colored rectangles.
  */
 export class TileRenderer {
   private readonly stage: Container;
@@ -80,6 +76,8 @@ export class TileRenderer {
       animatedTiles.map((t) => t.ly * CHUNK_SIZE + t.lx),
     );
 
+    const useTextures = textureManager.isLoaded();
+
     for (let ly = 0; ly < CHUNK_SIZE; ly++) {
       for (let lx = 0; lx < CHUNK_SIZE; lx++) {
         const tileType = chunk.tiles[ly]?.[lx];
@@ -90,24 +88,37 @@ export class TileRenderer {
 
         const wx = chunk.cx * CHUNK_SIZE + lx;
         const wy = chunk.cy * CHUNK_SIZE + ly;
-        const baseColor = TILE_COLORS[tileType] ?? 0xff00ff;
-        const color = tileColor(tileType, baseColor, wx, wy, VARIATION_SEED);
 
-        base.rect(lx * TILE_PX, ly * TILE_PX, TILE_PX, TILE_PX);
-        base.fill(color);
+        if (useTextures) {
+          // Use texture from spritesheet
+          const texture = textureManager.getTileTexture(tileType);
+          const sprite = new Sprite(texture);
+          sprite.x = chunk.cx * chunkPx + lx * TILE_PX;
+          sprite.y = chunk.cy * chunkPx + ly * TILE_PX;
+          this.stage.addChild(sprite);
+        } else {
+          // Fallback: colored rectangle
+          const baseColor = TILE_COLORS[tileType] ?? 0xff00ff;
+          const color = tileColor(tileType, baseColor, wx, wy, VARIATION_SEED);
+          base.rect(lx * TILE_PX, ly * TILE_PX, TILE_PX, TILE_PX);
+          base.fill(color);
+        }
       }
     }
 
     // Draw initial water frame (t = 0)
-    this.drawWaterLayer(water, chunk, animatedTiles, 0);
+    if (!useTextures) {
+      this.drawWaterLayer(water, chunk, animatedTiles, 0);
+    }
 
-    base.x = chunk.cx * chunkPx;
-    base.y = chunk.cy * chunkPx;
-    water.x = base.x;
-    water.y = base.y;
-
-    this.stage.addChild(base);
-    this.stage.addChild(water);
+    if (!useTextures) {
+      base.x = chunk.cx * chunkPx;
+      base.y = chunk.cy * chunkPx;
+      water.x = base.x;
+      water.y = base.y;
+      this.stage.addChild(base);
+      this.stage.addChild(water);
+    }
 
     this.chunks.set(key, { base, water, animatedTiles });
   }
@@ -148,11 +159,11 @@ export class TileRenderer {
    * Must be called once per frame with the elapsed time in seconds.
    */
   update(time: number): void {
+    if (textureManager.isLoaded()) return; // no animation needed with textures
+
     for (const [, state] of this.chunks) {
       if (state.animatedTiles.length === 0) continue;
       state.water.clear();
-      // We need the chunk coordinates to compute world positions.
-      // Stored indirectly via the Graphics position.
       const cx = Math.round(state.base.x / (CHUNK_SIZE * TILE_PX));
       const cy = Math.round(state.base.y / (CHUNK_SIZE * TILE_PX));
       this.drawWaterLayerFromCoords(state.water, cx, cy, state.animatedTiles, time);

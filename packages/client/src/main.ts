@@ -1,7 +1,7 @@
 import { Application, Container } from "pixi.js";
 import { MOVE_SPEED, CHUNK_SIZE } from "@mmo/shared";
 
-import { Camera, TileRenderer, EntityRenderer, MobRenderer, TILE_PX } from "./renderer/index.js";
+import { Camera, TileRenderer, EntityRenderer, MobRenderer, TILE_PX, textureManager } from "./renderer/index.js";
 import { NetworkManager } from "./network/index.js";
 import { InputManager, TouchControls } from "./input/index.js";
 import type { InputVector } from "./input/index.js";
@@ -28,6 +28,9 @@ async function main() {
   const container = document.getElementById("game-container");
   if (!container) throw new Error("Missing #game-container element");
   container.appendChild(app.canvas);
+
+  // Load game textures (spritesheets)
+  await textureManager.load();
 
   // Game state
   const gameState = new GameState(SEED);

@@ -1,10 +1,9 @@
-import { Graphics, Container, Text, TextStyle } from "pixi.js";
-import type { GameState, RemotePlayer } from "../game/GameState.js";
+import { Graphics, Container, Text, TextStyle, Sprite } from "pixi.js";
+import type { GameState } from "../game/GameState.js";
 import { TILE_PX } from "./TileRenderer.js";
+import { textureManager } from "./TextureManager.js";
 
-const PLAYER_SIZE = 12;
-const PLAYER_COLOR = 0x3498db;   // blue for local player
-const REMOTE_COLOR = 0xe74c3c;   // red for remote players
+const PLAYER_SIZE = 16;
 
 const NAME_STYLE = new TextStyle({
   fontSize: 10,
@@ -13,17 +12,15 @@ const NAME_STYLE = new TextStyle({
 });
 
 /**
- * Renders player entities as colored circles with name labels.
- *
- * Only players whose world position falls within the viewport + buffer
- * are drawn each frame (culling).
+ * Renders player entities as sprites (or colored circles as fallback).
+ * Only players within the viewport + buffer are drawn each frame (culling).
  */
 export class EntityRenderer {
   private readonly stage: Container;
   private readonly gameState: GameState;
 
-  /** Map of playerId → Graphics (the circle) */
-  private readonly entities = new Map<string, Graphics>();
+  /** Map of playerId → Sprite or Graphics */
+  private readonly entities = new Map<string, Sprite | Graphics>();
   /** Map of playerId → Container (the name label group) */
   private readonly labels = new Map<string, Container>();
 
@@ -34,7 +31,7 @@ export class EntityRenderer {
 
   /** Call once per frame to sync entity visuals with game state. */
   update(viewportBounds: { left: number; right: number; top: number; bottom: number }): void {
-    const buffer = 64; // px buffer around viewport
+    const buffer = 64;
 
     const visibleLeft = viewportBounds.left - buffer;
     const visibleRight = viewportBounds.right + buffer;
@@ -49,7 +46,7 @@ export class EntityRenderer {
         local.x * TILE_PX,
         local.y * TILE_PX,
         local.name,
-        PLAYER_COLOR,
+        true,
         visibleLeft,
         visibleRight,
         visibleTop,
@@ -64,7 +61,7 @@ export class EntityRenderer {
         player.x * TILE_PX,
         player.y * TILE_PX,
         player.name,
-        REMOTE_COLOR,
+        false,
         visibleLeft,
         visibleRight,
         visibleTop,
@@ -113,7 +110,7 @@ export class EntityRenderer {
     px: number,
     py: number,
     name: string,
-    color: number,
+    isLocal: boolean,
     vLeft: number,
     vRight: number,
     vTop: number,
@@ -129,18 +126,29 @@ export class EntityRenderer {
       return;
     }
 
-    // Circle
-    let g = this.entities.get(id);
-    if (!g) {
-      g = new Graphics();
-      g.circle(0, 0, PLAYER_SIZE / 2);
-      g.fill(color);
-      this.stage.addChild(g);
-      this.entities.set(id, g);
+    let entity = this.entities.get(id);
+    if (!entity) {
+      if (textureManager.isLoaded()) {
+        // Use character sprite
+        const texture = textureManager.getCharacterTexture(isLocal ? "player" : "remote");
+        const sprite = new Sprite(texture);
+        sprite.anchor.set(0.5);
+        this.stage.addChild(sprite);
+        entity = sprite;
+      } else {
+        // Fallback: colored circle
+        const color = isLocal ? 0x3498db : 0xe74c3c;
+        const g = new Graphics();
+        g.circle(0, 0, PLAYER_SIZE / 2);
+        g.fill(color);
+        this.stage.addChild(g);
+        entity = g;
+      }
+      this.entities.set(id, entity);
     }
-    g.x = px;
-    g.y = py;
-    g.visible = true;
+    entity.x = px;
+    entity.y = py;
+    entity.visible = true;
 
     // Name label
     let label = this.labels.get(id);

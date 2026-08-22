@@ -18,3 +18,4 @@ export {
 export type { AnimatedTile } from "./TileAnimations.js";
 export { PhysicsRenderer } from "./PhysicsRenderer.js";
 export type { PhysicsEffect } from "./PhysicsRenderer.js";
+export { textureManager } from "./TextureManager.js";

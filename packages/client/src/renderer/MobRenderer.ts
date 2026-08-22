@@ -1,7 +1,8 @@
-import { Graphics, Container, Text, TextStyle } from "pixi.js";
+import { Graphics, Container, Text, TextStyle, Sprite } from "pixi.js";
 import { TILE_PX } from "./TileRenderer.js";
+import { textureManager } from "./TextureManager.js";
 
-/* ── Mob Type Colors ── */
+/* ── Mob Type Colors (fallback) ── */
 
 const MOB_COLORS: Record<string, number> = {
   wolf: 0x8b6914,
@@ -10,7 +11,7 @@ const MOB_COLORS: Record<string, number> = {
   slime: 0x44cc44,
 };
 
-const MOB_SIZE = 14;
+const MOB_SIZE = 16;
 const NAME_STYLE = new TextStyle({
   fontSize: 9,
   fill: 0xffffff,
@@ -33,14 +34,14 @@ export interface MobData {
 /* ── MobRenderer Class ── */
 
 /**
- * Renders mob entities as colored circles with name labels.
+ * Renders mob entities as sprites (or colored circles as fallback).
  * Shows aggro indicator (red glow) when chasing a player.
  */
 export class MobRenderer {
   private readonly stage: Container;
 
-  /** Map of mobId → Graphics (the circle) */
-  private readonly mobGraphics = new Map<string, Graphics>();
+  /** Map of mobId → Sprite or Graphics */
+  private readonly mobGraphics = new Map<string, Sprite | Graphics>();
   /** Map of mobId → Container (name label group) */
   private readonly mobLabels = new Map<string, Container>();
   /** Map of mobId → Graphics (aggro glow ring) */
@@ -116,14 +117,25 @@ export class MobRenderer {
         continue;
       }
 
-      // Draw mob circle
+      // Draw mob sprite or circle
       let g = this.mobGraphics.get(id);
       if (!g) {
-        g = new Graphics();
-        const color = MOB_COLORS[data.typeId] ?? 0xff00ff;
-        g.circle(0, 0, MOB_SIZE / 2);
-        g.fill(color);
-        this.stage.addChild(g);
+        if (textureManager.isLoaded()) {
+          // Use character sprite for mob type
+          const texture = textureManager.getCharacterTexture(data.typeId);
+          const sprite = new Sprite(texture);
+          sprite.anchor.set(0.5);
+          this.stage.addChild(sprite);
+          g = sprite;
+        } else {
+          // Fallback: colored circle
+          const color = MOB_COLORS[data.typeId] ?? 0xff00ff;
+          const graphics = new Graphics();
+          graphics.circle(0, 0, MOB_SIZE / 2);
+          graphics.fill(color);
+          this.stage.addChild(graphics);
+          g = graphics;
+        }
         this.mobGraphics.set(id, g);
       }
       g.x = px;
