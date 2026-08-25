@@ -253,14 +253,15 @@ export function isSandFamilyTile(t: TileType): boolean {
  * Each set bit means "that neighbour is grass-family"; the tile hosting
  * the overlay is sand-family.
  *
- * Returns 0 or 1 `GroundEdgeTile`. Quadrant pairs (two adjacent cardinals)
- * take priority over single edges, checked in fixed order N&W, N&E, S&W,
- * S&E. Single edges resolve by priority N > E > S > W. Diagonal-only
- * masks (no cardinal bits) return `[]` — a known limitation documented
- * here for future art coverage.
+ * Returns 0–4 `GroundEdgeTile`s. Cardinal bits take priority: quadrant
+ * pairs (two adjacent cardinals) beat single edges, checked in fixed order
+ * N&W, N&E, S&W, S&E; single edges resolve by priority N > E > S > W.
+ * Diagonal-only masks (no cardinal bits) return corner overlays from
+ * edge-grass-dirt9..12 — one per set diagonal (corners paint disjoint
+ * quadrants, so they stack), ordered by ascending bit value NW→NE→SW→SE.
  *
  * @param mask Bitmask where each bit represents a grass-family neighbour
- * @returns Array containing 0 or 1 GroundEdgeTile
+ * @returns Array of 0–4 GroundEdgeTiles
  */
 export function getGroundEdgeTiles(mask: number): GroundEdgeTile[] {
   if (mask === 0) return [];
@@ -268,8 +269,16 @@ export function getGroundEdgeTiles(mask: number): GroundEdgeTile[] {
   const edges = mask & (Direction.N | Direction.E | Direction.S | Direction.W);
 
   if (edges === 0) {
-    // Diagonal-only → no ground-edge overlay (documented limitation)
-    return [];
+    // Diagonal-only → corner overlays (edge-grass-dirt9..12). Corners paint
+    // disjoint quadrants, so every set diagonal gets its tile; order is fixed
+    // by ascending bit value for determinism: NW(1)→9, NE(4)→10, SW(32)→12,
+    // SE(128)→11.
+    const corners: GroundEdgeTile[] = [];
+    if (mask & Direction.NW) corners.push({ index: 9 });
+    if (mask & Direction.NE) corners.push({ index: 10 });
+    if (mask & Direction.SW) corners.push({ index: 12 });
+    if (mask & Direction.SE) corners.push({ index: 11 });
+    return corners;
   }
 
   // Quadrant pairs first, fixed check order: N&W, N&E, S&W, S&E

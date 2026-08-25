@@ -13,22 +13,68 @@ describe("getGroundEdgeTiles", () => {
     expect(getGroundEdgeTiles(0)).toEqual([]);
   });
 
-  // ── Diagonal-only → [] ──
+  // ── Diagonal-only → corner tiles (edge-grass-dirt9..12) ──
 
-  it("returns [] for NW alone", () => {
-    expect(getGroundEdgeTiles(Direction.NW)).toEqual([]);
+  it("returns [{index:9}] for NW alone (grass top-left)", () => {
+    expect(getGroundEdgeTiles(Direction.NW)).toEqual([{ index: 9 }]);
   });
 
-  it("returns [] for NE alone", () => {
-    expect(getGroundEdgeTiles(Direction.NE)).toEqual([]);
+  it("returns [{index:10}] for NE alone (grass top-right)", () => {
+    expect(getGroundEdgeTiles(Direction.NE)).toEqual([{ index: 10 }]);
   });
 
-  it("returns [] for SW alone", () => {
-    expect(getGroundEdgeTiles(Direction.SW)).toEqual([]);
+  it("returns [{index:12}] for SW alone (grass bottom-left)", () => {
+    expect(getGroundEdgeTiles(Direction.SW)).toEqual([{ index: 12 }]);
   });
 
-  it("returns [] for SE alone", () => {
-    expect(getGroundEdgeTiles(Direction.SE)).toEqual([]);
+  it("returns [{index:11}] for SE alone (grass bottom-right)", () => {
+    expect(getGroundEdgeTiles(Direction.SE)).toEqual([{ index: 11 }]);
+  });
+
+  // ── Multiple diagonals → one corner tile per set bit, ascending bit order ──
+
+  it("returns [9,10] for NW|NE", () => {
+    expect(getGroundEdgeTiles(Direction.NW | Direction.NE)).toEqual([
+      { index: 9 },
+      { index: 10 },
+    ]);
+  });
+
+  it("returns [9,12] for NW|SW", () => {
+    expect(getGroundEdgeTiles(Direction.NW | Direction.SW)).toEqual([
+      { index: 9 },
+      { index: 12 },
+    ]);
+  });
+
+  it("returns [9,11] for NW|SE — opposite corners stack", () => {
+    expect(getGroundEdgeTiles(Direction.NW | Direction.SE)).toEqual([
+      { index: 9 },
+      { index: 11 },
+    ]);
+  });
+
+  it("returns [10,12] for NE|SW — opposite corners stack", () => {
+    expect(getGroundEdgeTiles(Direction.NE | Direction.SW)).toEqual([
+      { index: 10 },
+      { index: 12 },
+    ]);
+  });
+
+  it("returns three corners for NW|NE|SW in bit order", () => {
+    expect(getGroundEdgeTiles(Direction.NW | Direction.NE | Direction.SW)).toEqual([
+      { index: 9 },
+      { index: 10 },
+      { index: 12 },
+    ]);
+  });
+
+  it("returns all four corners for NW|NE|SW|SE", () => {
+    expect(
+      getGroundEdgeTiles(
+        Direction.NW | Direction.NE | Direction.SW | Direction.SE,
+      ),
+    ).toEqual([{ index: 9 }, { index: 10 }, { index: 12 }, { index: 11 }]);
   });
 
   // ── Single cardinal edges ──
@@ -87,12 +133,36 @@ describe("getGroundEdgeTiles", () => {
     expect(getGroundEdgeTiles(Direction.E | Direction.W)).toEqual([{ index: 5 }]);
   });
 
-  // ── Exhaustive: result length ≤ 1 for every mask 0..255 ──
+  // ── Cardinal bits take priority over diagonals ──
 
-  it("always returns 0 or 1 tiles for every mask 0..255", () => {
+  it("returns [{index:2}] for N|NW — cardinal wins, diagonal ignored", () => {
+    expect(getGroundEdgeTiles(Direction.N | Direction.NW)).toEqual([{ index: 2 }]);
+  });
+
+  it("returns [{index:1}] for N|W|SE|SW — quadrant beats diagonals", () => {
+    expect(
+      getGroundEdgeTiles(Direction.N | Direction.W | Direction.SE | Direction.SW),
+    ).toEqual([{ index: 1 }]);
+  });
+
+  // ── Exhaustive invariants for every mask 0..255 ──
+
+  it("always returns 0..4 tiles with unique indices for every mask 0..255", () => {
     for (let mask = 0; mask <= 255; mask++) {
       const result = getGroundEdgeTiles(mask);
-      expect(result.length).toBeLessThanOrEqual(1);
+      expect(result.length).toBeLessThanOrEqual(4);
+      const indices = result.map((t) => t.index);
+      expect(new Set(indices).size).toBe(indices.length);
+    }
+  });
+
+  it("returns ≥2 tiles only via diagonal-only masks", () => {
+    const CARDINALS = Direction.N | Direction.E | Direction.S | Direction.W;
+    for (let mask = 0; mask <= 255; mask++) {
+      const result = getGroundEdgeTiles(mask);
+      if (result.length >= 2) {
+        expect(mask & CARDINALS).toBe(0);
+      }
     }
   });
 
