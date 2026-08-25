@@ -55,6 +55,10 @@ async function main() {
   // Wire cross-chunk tile lookup for deterministic shore bitmask rendering
   tileRenderer.setWorldTileQuery((wx, wy) => gameState.getTileAt(wx, wy));
 
+  // Debug handles for headless QA / console inspection (harmless in production)
+  (window as unknown as Record<string, unknown>).__PIXI_APP__ = app;
+  (window as unknown as Record<string, unknown>).__GAME_DEBUG__ = { tileRenderer, gameState, camera };
+
   // Entity renderer (players)
   const entityRenderer = new EntityRenderer(worldStage, gameState);
 

@@ -44,6 +44,7 @@ const TILE_TYPE_TO_INDEX: Record<number, number> = {
   [TileType.ForestToSwamp]:  0,
   [TileType.ForestToStone]:  0,
   [TileType.GrassToSand]:    0,
+  [TileType.GravelPath]:     43,  // Tiny Town atlas row 3 col 7 — gravel-on-ground path tile
 };
 
 /**

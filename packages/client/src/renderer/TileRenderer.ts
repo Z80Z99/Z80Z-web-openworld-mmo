@@ -64,6 +64,11 @@ const BASE_COLORS: Record<number, number> = {
   [TileType.WaterVariant1]:     0x3575d0,
   [TileType.WaterVariant2]:     0x4085e0,
   [TileType.DeepWaterVariant1]: 0x1852a0,
+
+  // GravelPath: muted grey-tan bridging grass green (0x5a8f4a) and sand warm
+  // (0xe8d5a3) — 0xB8A98C sits in the same value range as SandToStone (0xa09a80)
+  // but slightly cooler/less saturated to read as compacted gravel.
+  [TileType.GravelPath]:     0xb8a98c,
 };
 
 // ── Decoration Palette ──────────────────────────────────────────────────────
@@ -307,6 +312,21 @@ function drawDecorations(g: Graphics, tileType: number, lx: number, ly: number, 
       const gx = ox + 4 + (h4 * 8) | 0;
       const gy = oy + 3 + (h1 * 8) | 0;
       px(g, gx, gy, DECO.iceGlint);
+    }
+    return;
+  }
+
+  // ── Gravel path: scattered pebbles (no trees — paths are cleared) ────────
+  if (tileType === TileType.GravelPath) {
+    if (h1 > 0.55) {
+      const px1 = ox + 2 + (h2 * 12) | 0;
+      const py1 = oy + 3 + (h3 * 10) | 0;
+      px(g, px1, py1, h4 > 0.5 ? DECO.pebbleLight : DECO.pebbleDark, 2, 1);
+    }
+    if (h3 > 0.85) {
+      const px2 = ox + 6 + (h4 * 6) | 0;
+      const py2 = oy + 7 + (h1 * 4) | 0;
+      px(g, px2, py2, DECO.pebbleDark, 1, 1);
     }
     return;
   }

@@ -30,7 +30,8 @@ export type TerrainCategory =
   | "swamp"
   | "ice"
   | "shore"
-  | "water";
+  | "water"
+  | "gravel";  // GravelPath — man-made walking path; suppresses trees/large decor
 
 /** Classify a TileType into a terrain category. */
 export function classifyTerrain(tileType: number): TerrainCategory | null {
@@ -96,6 +97,10 @@ export function classifyTerrain(tileType: number): TerrainCategory | null {
     tileType === TileType.SnowToIce
   ) return "ice";
 
+  // GravelPath: man-made path tile — classified separately from natural terrain
+  // so large decorations (trees, trunks, canopies) are suppressed on paths.
+  if (tileType === TileType.GravelPath) return "gravel";
+
   if (
     tileType === TileType.Grass ||
     tileType === TileType.GrassVariant1 ||
@@ -145,6 +150,9 @@ export const TERRAIN_DECORATIONS: Record<TerrainCategory, readonly number[]> = {
   ice: [],
   shore: [],
   water: [],
+  // GravelPath: no atlas decorations on walking paths — pebbles are procedural
+  // only (drawn in TileRenderer drawDecorations). Trees/large decor suppressed.
+  gravel: [],
 };
 
 // ── Decoration selection ────────────────────────────────────────────────────
@@ -164,6 +172,8 @@ const DENSITY_MAP: Record<TerrainCategory, number> = {
   ice: 0.12,
   shore: 0.20,
   water: 0.0,
+  // GravelPath: very low — paths should stay mostly clear
+  gravel: 0.10,
 };
 
 /**
