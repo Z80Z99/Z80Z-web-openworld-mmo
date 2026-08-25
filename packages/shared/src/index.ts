@@ -55,6 +55,9 @@ export {
   maskToBinary,
   getActiveDirections,
   computeNeighborMask,
+  isGrassFamilyTile,
+  isSandFamilyTile,
+  getGroundEdgeTiles,
 } from "./world-gen/index.js";
 
-export type { Chunk, WorldGenConfig, LayeredBiomeParams, ShoreTile, ShoreRule } from "./world-gen/index.js";
+export type { Chunk, WorldGenConfig, LayeredBiomeParams, ShoreTile, ShoreRule, GroundEdgeTile } from "./world-gen/index.js";

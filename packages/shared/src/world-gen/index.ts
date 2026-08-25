@@ -32,4 +32,8 @@ export {
   maskToBinary,
   getActiveDirections,
   computeNeighborMask,
+  type GroundEdgeTile,
+  isGrassFamilyTile,
+  isSandFamilyTile,
+  getGroundEdgeTiles,
 } from "./shore-rules.js";

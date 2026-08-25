@@ -13,6 +13,8 @@
  * The mask value (0-255) determines which shore PNGs to draw.
  */
 
+import { TileType } from "./types.js";
+
 // ── Bitmask Constants ──────────────────────────────────────────────
 
 export const Direction = {
@@ -198,4 +200,89 @@ export function computeNeighborMask(
   if (isLand(wx,     wy + 1)) mask |= Direction.S;
   if (isLand(wx + 1, wy + 1)) mask |= Direction.SE;
   return mask;
+}
+
+// ── Ground-Edge Tile Selection ─────────────────────────────────────
+
+/**
+ * A single ground-edge overlay tile.
+ *
+ * `index` maps to `edge-grass-dirt{index}.png` (1–8).
+ */
+export interface GroundEdgeTile {
+  readonly index: number;
+}
+
+/**
+ * Returns true when `t` is any grass-family tile (grass, forest, or
+ * grass-transition variants that visually belong to the green biome).
+ */
+export function isGrassFamilyTile(t: TileType): boolean {
+  switch (t) {
+    case TileType.Grass:
+    case TileType.GrassVariant1:
+    case TileType.GrassVariant2:
+    case TileType.Forest:
+    case TileType.ForestVariant1:
+    case TileType.ForestVariant2:
+    case TileType.GrassToForest:
+    case TileType.GrassToSand:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Returns true when `t` is a sand-family tile (sand or sand variant).
+ */
+export function isSandFamilyTile(t: TileType): boolean {
+  switch (t) {
+    case TileType.Sand:
+    case TileType.SandVariant1:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Deterministic ground-edge overlay selection for a sand-family tile
+ * whose 8-neighbor bitmask encodes which neighbours are grass-family.
+ *
+ * Each set bit means "that neighbour is grass-family"; the tile hosting
+ * the overlay is sand-family.
+ *
+ * Returns 0 or 1 `GroundEdgeTile`. Quadrant pairs (two adjacent cardinals)
+ * take priority over single edges, checked in fixed order N&W, N&E, S&W,
+ * S&E. Single edges resolve by priority N > E > S > W. Diagonal-only
+ * masks (no cardinal bits) return `[]` — a known limitation documented
+ * here for future art coverage.
+ *
+ * @param mask Bitmask where each bit represents a grass-family neighbour
+ * @returns Array containing 0 or 1 GroundEdgeTile
+ */
+export function getGroundEdgeTiles(mask: number): GroundEdgeTile[] {
+  if (mask === 0) return [];
+
+  const edges = mask & (Direction.N | Direction.E | Direction.S | Direction.W);
+
+  if (edges === 0) {
+    // Diagonal-only → no ground-edge overlay (documented limitation)
+    return [];
+  }
+
+  // Quadrant pairs first, fixed check order: N&W, N&E, S&W, S&E
+  if ((mask & Direction.N) && (mask & Direction.W)) return [{ index: 1 }];
+  if ((mask & Direction.N) && (mask & Direction.E)) return [{ index: 3 }];
+  if ((mask & Direction.S) && (mask & Direction.W)) return [{ index: 6 }];
+  if ((mask & Direction.S) && (mask & Direction.E)) return [{ index: 8 }];
+
+  // Single edge by priority: N > E > S > W
+  if (mask & Direction.N) return [{ index: 2 }];
+  if (mask & Direction.E) return [{ index: 5 }];
+  if (mask & Direction.S) return [{ index: 7 }];
+  if (mask & Direction.W) return [{ index: 4 }];
+
+  return [];
 }
