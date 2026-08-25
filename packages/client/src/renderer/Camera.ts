@@ -46,17 +46,26 @@ export class Camera {
     this.x += (targetX - this.x) * t;
     this.y += (targetY - this.y) * t;
 
-    // Apply offset: stage moves opposite to camera
-    this.stage.x = -this.x + this.viewportWidth / 2;
-    this.stage.y = -this.y + this.viewportHeight / 2;
+    this.applyStageOffset();
   }
 
   /** Snap camera immediately (no lerp). */
   snapTo(x: number, y: number): void {
     this.x = x;
     this.y = y;
-    this.stage.x = -this.x + this.viewportWidth / 2;
-    this.stage.y = -this.y + this.viewportHeight / 2;
+    this.applyStageOffset();
+  }
+
+  /**
+   * Mirror the camera offset into the stage position, snapped to whole
+   * screen pixels AFTER scaling. Pixel-art tiles must never land on
+   * subpixel positions — fractional offsets cause bilinear shimmering and
+   * visible seams between adjacent tiles while the map is moving.
+   */
+  private applyStageOffset(): void {
+    const s = this.stage.scale.x || 1;
+    this.stage.x = Math.round((-this.x + this.viewportWidth / 2) * s) / s;
+    this.stage.y = Math.round((-this.y + this.viewportHeight / 2) * s) / s;
   }
 
   /** Returns the world-space bounds of the visible viewport. */

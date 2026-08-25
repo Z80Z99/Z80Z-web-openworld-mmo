@@ -57,7 +57,7 @@ async function main() {
 
   // Debug handles for headless QA / console inspection (harmless in production)
   (window as unknown as Record<string, unknown>).__PIXI_APP__ = app;
-  (window as unknown as Record<string, unknown>).__GAME_DEBUG__ = { tileRenderer, gameState, camera };
+  (window as unknown as Record<string, unknown>).__GAME_DEBUG__ = { tileRenderer, gameState, camera, textureManager };
 
   // Entity renderer (players)
   const entityRenderer = new EntityRenderer(worldStage, gameState);

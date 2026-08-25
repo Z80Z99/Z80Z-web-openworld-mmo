@@ -28,23 +28,25 @@ const BATTLE_SPACING = 1;
  * Grass variants map to ground tiles 0–2; Sand (dirt visual) maps to atlas 25.
  * Everything else uses procedural rendering.
  */
-// Forest family renders grass ground textures because trees are independent
-// Layer-2 decorations (and grass↔sand transition band renders as grass canvas
-// for the mask overlay system).
-const TILE_TYPE_TO_INDEX: Record<number, number> = {
-  [TileType.Grass]:         0,
-  [TileType.GrassVariant1]: 1,
-  [TileType.GrassVariant2]: 2,
-  [TileType.Sand]:          25,
-  [TileType.SandVariant1]:  25,
-  [TileType.Forest]:         0,
-  [TileType.ForestVariant1]: 1,
-  [TileType.ForestVariant2]: 2,
-  [TileType.GrassToForest]:  0,
-  [TileType.ForestToSwamp]:  0,
-  [TileType.ForestToStone]:  0,
-  [TileType.GrassToSand]:    0,
-  [TileType.GravelPath]:     43,  // Tiny Town atlas row 3 col 7 — gravel-on-ground path tile
+// Ground tiles load from STANDALONE per-tile PNGs in /assets/game-assets/
+// (byte-identical to their Tiny Town atlas cells). Individual files have no
+// sheet neighbours, so linear sampling can never bleed a neighbouring atlas
+// tile's colours into tile edges when the stage lands on subpixel positions.
+// Trees and other decorations keep using the full atlas slicing below.
+const GROUND_TILE_FILES: Record<number, string> = {
+  [TileType.Grass]:         "grass1.png",
+  [TileType.GrassVariant1]: "grass2.png",
+  [TileType.GrassVariant2]: "grass3.png",
+  [TileType.Sand]:          "dirt1.png",
+  [TileType.SandVariant1]:  "dirt1.png",
+  [TileType.Forest]:         "grass1.png",
+  [TileType.ForestVariant1]: "grass2.png",
+  [TileType.ForestVariant2]: "grass3.png",
+  [TileType.GrassToForest]:  "grass1.png",
+  [TileType.ForestToSwamp]:  "grass1.png",
+  [TileType.ForestToStone]:  "grass1.png",
+  [TileType.GrassToSand]:    "grass1.png",
+  [TileType.GravelPath]:     "gravel1.png",
 };
 
 /**
@@ -106,19 +108,20 @@ export class TextureManager {
 
   private async loadTilemap(): Promise<void> {
     try {
+      // Ground tiles: standalone PNGs, nearest-neighbour sampled (pixel art
+      // must not blend texels when scaled by the world stage).
+      const groundEntries = Object.entries(GROUND_TILE_FILES);
+      await Promise.all(
+        groundEntries.map(async ([typeStr, file]) => {
+          const tex = await Assets.load(`/assets/game-assets/${file}`);
+          tex.source.scaleMode = "nearest";
+          this.tileTextures.set(parseInt(typeStr), tex);
+        }),
+      );
+
+      // Decoration atlas: slice all 132 Tiny Town tiles for trees/decor.
       const sheet = await Assets.load(TILEMAP_SHEET);
-      // Load ground tiles by TileType
-      for (const [typeStr, index] of Object.entries(TILE_TYPE_TO_INDEX)) {
-        const tileType = parseInt(typeStr);
-        const col = index % TILEMAP_COLS;
-        const row = Math.floor(index / TILEMAP_COLS);
-        const x = col * TILE_SIZE;
-        const y = row * TILE_SIZE;
-        const frame = new Rectangle(x, y, TILE_SIZE, TILE_SIZE);
-        const tex = new Texture({ source: sheet.source, frame });
-        this.tileTextures.set(tileType, tex);
-      }
-      // Index all 132 atlas tiles (flat index 0–131)
+      sheet.source.scaleMode = "nearest";
       for (let i = 0; i < TOTAL_ATLAS_TILES; i++) {
         const col = i % TILEMAP_COLS;
         const row = Math.floor(i / TILEMAP_COLS);
@@ -138,6 +141,7 @@ export class TextureManager {
   private async loadCharacters(): Promise<void> {
     try {
       const sheet = await Assets.load(CHARACTER_SHEET);
+      sheet.source.scaleMode = "nearest";
       for (const [key, index] of Object.entries(CHARACTER_INDICES)) {
         const col = index % CHARACTER_SHEET_COLS;
         const row = Math.floor(index / CHARACTER_SHEET_COLS);
@@ -156,21 +160,25 @@ export class TextureManager {
 
   private async loadBattleWater(): Promise<void> {
     try {
-      this.pureWaterTexture = await Assets.load("/assets/game-assets/water1.png");
+      const waterTex = await Assets.load("/assets/game-assets/water1.png");
+      waterTex.source.scaleMode = "nearest";
+      this.pureWaterTexture = waterTex;
 
       const shoreNames = [
         "shore1", "shore2", "shore3", "shore4", "shore5", "shore6", "shore7", "shore8",
         "convex-shore1", "convex-shore2", "convex-shore3", "convex-shore4"
       ];
-      
+
       for (const name of shoreNames) {
         const shoreTex = await Assets.load(`/assets/game-assets/${name}.png`);
+        shoreTex.source.scaleMode = "nearest";
         this.shoreTextures.push(shoreTex);
       }
 
       const edgeGrassDirtCount = 12;
       for (let i = 1; i <= edgeGrassDirtCount; i++) {
         const edgeTex = await Assets.load(`/assets/game-assets/edge-grass-dirt${i}.png`);
+        edgeTex.source.scaleMode = "nearest";
         this.groundEdgeTextures.push(edgeTex);
       }
     } catch (e) {
@@ -207,11 +215,11 @@ export class TextureManager {
   }
 
   /**
-   * Get the atlas index for a given TileType, or null if not mapped.
-   * Exposed so callers can look up ground tile atlas indices directly.
+   * Get the source file name for a ground TileType, or null if unmapped.
+   * Ground tiles load from standalone PNGs — see GROUND_TILE_FILES.
    */
-  getAtlasIndexForTileType(tileType: number): number | null {
-    return TILE_TYPE_TO_INDEX[tileType] ?? null;
+  getGroundFileForTileType(tileType: number): string | null {
+    return GROUND_TILE_FILES[tileType] ?? null;
   }
 
   /** Get a tree texture by index (0-based into treeTextures array). */
