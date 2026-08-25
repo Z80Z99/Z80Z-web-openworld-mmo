@@ -11,10 +11,11 @@
   },
   "dependencies": {
     "@mmo/shared": "*",
-    "pixi.js": "^8.20.0",
-    "colyseus.js": "^0.15.28"
+    "colyseus.js": "^0.15.28",
+    "pixi.js": "^8.20.0"
   },
   "devDependencies": {
+    "sharp": "^0.35.3",
     "vite": "^6.3.0",
     "vitest": "^3.1.0"
   }

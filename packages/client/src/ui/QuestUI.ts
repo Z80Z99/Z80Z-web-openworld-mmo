@@ -35,7 +35,7 @@ export class QuestUI {
       position: absolute; top: 12px; right: 12px; z-index: 20;
       width: 240px; background: rgba(0,0,0,0.8); border: 1px solid #555;
       border-radius: 6px; font-family: monospace; color: #fff;
-      pointer-events: auto; user-select: none;
+      pointer-events: auto; user-select: none; display: none;
     `;
     parent.appendChild(this.container);
     this.build();
@@ -110,31 +110,30 @@ export class QuestUI {
    */
   update(data: QuestUIData): void {
     const nameEl = this.body.querySelector("#quest-name") as HTMLElement;
+    const questName = data.questName ?? "Unknown Quest";
+    const stepDesc = data.stepDescription ?? "";
+    const current = data.progressCurrent ?? 0;
+    const total = data.progressTotal ?? 0;
+
     if (data.completed) {
-      nameEl.textContent = `✓ ${data.questName}`;
+      nameEl.textContent = `✓ ${questName}`;
       nameEl.style.color = "#2ecc71";
       this.stepText.textContent = `Completed! +${data.xpReward ?? 0} XP`;
       this.progressFill.style.width = "100%";
       this.progressFill.style.background = "#2ecc71";
       this.progressLabel.textContent = "Done";
-
-      // Auto-hide after 5 seconds
       if (this.completionTimeout) clearTimeout(this.completionTimeout);
       this.completionTimeout = setTimeout(() => this.hide(), 5000);
       return;
     }
 
-    nameEl.textContent = data.questName;
+    nameEl.textContent = questName;
     nameEl.style.color = "#f1c40f";
-    this.stepText.textContent = data.stepDescription;
+    this.stepText.textContent = stepDesc;
 
-    // Progress
-    const pct =
-      data.progressTotal > 0
-        ? Math.min(100, (data.progressCurrent / data.progressTotal) * 100)
-        : 0;
+    const pct = total > 0 ? Math.min(100, (current / total) * 100) : 0;
     this.progressFill.style.width = `${pct}%`;
-    this.progressLabel.textContent = `${data.progressCurrent}/${data.progressTotal}`;
+    this.progressLabel.textContent = `${current}/${total}`;
 
     this.show();
   }

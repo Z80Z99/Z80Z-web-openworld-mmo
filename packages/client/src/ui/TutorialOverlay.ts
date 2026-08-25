@@ -89,7 +89,7 @@ export class TutorialOverlay {
       padding: 10px 20px; background: rgba(0,0,0,0.85); border: 1px solid #f1c40f;
       border-radius: 6px; font-size: 14px; text-align: center;
       pointer-events: auto; cursor: pointer; max-width: 400px;
-      transition: opacity 0.3s;
+      transition: opacity 0.3s; display: none;
     `;
     this.messageEl.addEventListener("click", () => this.dismiss());
     this.container.appendChild(this.messageEl);
