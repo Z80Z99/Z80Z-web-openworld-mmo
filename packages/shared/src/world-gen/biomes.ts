@@ -284,16 +284,3 @@ export function resolveChunkTiles(
   return tiles;
 }
 
-/**
- * Legacy single-tile resolver for backward compatibility.
- * Used by WorldGenerator for simple chunk generation without neighbor context.
- */
-export function resolveTile(
-  rawElevation: number,
-  rawMoisture: number,
-): TileType {
-  const e = normalise(rawElevation);
-  const m = normalise(rawMoisture);
-  const biome = lookupBiome(e, m);
-  return biomeToTile(biome);
-}

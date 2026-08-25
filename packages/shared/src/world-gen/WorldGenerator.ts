@@ -8,7 +8,6 @@ import {
   Biome,
 } from "./types.js";
 import {
-  resolveTile,
   resolveChunkTiles,
   lookupBiome,
   lookupBiomeLayered,

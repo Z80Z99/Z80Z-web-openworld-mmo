@@ -42,7 +42,6 @@ export {
   lookupBiomeLayered,
   biomeToTile,
   biomeToVariantTile,
-  resolveTile,
   Direction,
   DIRECTION_NAMES,
   DIRECTION_MASK,

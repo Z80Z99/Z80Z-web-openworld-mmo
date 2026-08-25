@@ -13,7 +13,6 @@ export {
   lookupBiomeLayered,
   biomeToTile,
   biomeToVariantTile,
-  resolveTile,
   resolveChunkTiles,
   type LayeredBiomeParams,
 } from "./biomes.js";

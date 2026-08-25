@@ -12,22 +12,11 @@ import { TileType } from "@mmo/shared";
  */
 const TILEMAP_SHEET = "/assets/tiny-town/Tilemap/tilemap_packed.png";
 const CHARACTER_SHEET = "/assets/characters/roguelikeChar_transparent.png";
-const BATTLE_SHEET = "/assets/kenney_tiny-battle/Tilemap/tilemap_packed.png";
 const TILE_SIZE = 16;
-const SPACING = 0;
-export const TILEMAP_COLS = 12;
-export const TILEMAP_ROWS = 11;
-export const TOTAL_ATLAS_TILES = TILEMAP_COLS * TILEMAP_ROWS; // 132
+const TILEMAP_COLS = 12;
+const TILEMAP_ROWS = 11;
+const TOTAL_ATLAS_TILES = TILEMAP_COLS * TILEMAP_ROWS; // 132
 
-/** Tiny Battle tilemap: 18 cols × 11 rows, 1px spacing */
-const BATTLE_COLS = 18;
-const BATTLE_SPACING = 1;
-
-/**
- * Map TileType to Tiny Town tilemap index.
- * Grass variants map to ground tiles 0–2; Sand (dirt visual) maps to atlas 25.
- * Everything else uses procedural rendering.
- */
 // Ground tiles load from STANDALONE per-tile PNGs in /assets/game-assets/
 // (byte-identical to their Tiny Town atlas cells). Individual files have no
 // sheet neighbours, so linear sampling can never bleed a neighbouring atlas
@@ -48,31 +37,6 @@ const GROUND_TILE_FILES: Record<number, string> = {
   [TileType.GrassToSand]:    "grass1.png",
   [TileType.GravelPath]:     "gravel1.png",
 };
-
-/**
- * Tiny Battle water tile indices (18-col grid, 1px spacing):
- *   37 = pure water (main)
- *
- * Concave shore tiles (凹岸 — water on edge, land in center):
- *   18 = 左上凹岸 (top-left)
- *   19 = 正上凹岸 (top-center)
- *   20 = 右上凹岸 (top-right)
- *   36 = 正左凹岸 (left-center)
- *   38 = 正右凹岸 (right-center)
- *   54 = 左下凹岸 (bottom-left)
- *   55 = 正下凹岸 (bottom-center)
- *   56 = 右下凹岸 (bottom-right)
- *
- * Convex shore tiles (凸岸 — land on edge, water in center):
- *   90 = 右下凸岸 (bottom-right)
- *   91 = 左下凸岸 (bottom-left)
- *   92 = 左上凸岸 (top-left)
- *   93 = 右上凸岸 (top-right)
- */
-export const WATER_TILES = {
-  pure: [0],  // water1.png
-  shore: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],  // shore1-8 + convex-shore1-4
-} as const;
 
 /** Character sprite indices in Kenney roguelikeChar_transparent.png
  *  918x203 image, 16px tiles, 1px spacing = 54 columns x 12 rows
@@ -204,33 +168,8 @@ export class TextureManager {
     return this.atlasTextures.get(atlasIndex) ?? null;
   }
 
-  /** Whether a given atlas index has a loaded texture. */
-  hasAtlasIndex(atlasIndex: number): boolean {
-    return this.atlasTextures.has(atlasIndex);
-  }
-
   /** Number of loaded atlas tiles. */
   get atlasCount(): number {
-    return this.atlasTextures.size;
-  }
-
-  /**
-   * Get the source file name for a ground TileType, or null if unmapped.
-   * Ground tiles load from standalone PNGs — see GROUND_TILE_FILES.
-   */
-  getGroundFileForTileType(tileType: number): string | null {
-    return GROUND_TILE_FILES[tileType] ?? null;
-  }
-
-  /** Get a tree texture by index (0-based into treeTextures array). */
-  getTreeTexture(index: number): Texture | null {
-    const count = this.atlasTextures.size;
-    if (count === 0) return null;
-    return this.atlasTextures.get(index % count) ?? null;
-  }
-
-  /** Number of available tree textures (legacy — returns atlas count). */
-  get treeCount(): number {
     return this.atlasTextures.size;
   }
 
@@ -266,12 +205,6 @@ export class TextureManager {
     const idx = TextureManager.SHORE_NAME_TO_INDEX[name];
     if (idx === undefined || idx >= this.shoreTextures.length) return null;
     return this.shoreTextures[idx];
-  }
-
-  /** Get a shore texture by flat index (0–11). */
-  getShoreTexture(index: number): Texture | null {
-    if (this.shoreTextures.length === 0) return null;
-    return this.shoreTextures[index % this.shoreTextures.length];
   }
 
   /** Number of loaded shore textures. */
