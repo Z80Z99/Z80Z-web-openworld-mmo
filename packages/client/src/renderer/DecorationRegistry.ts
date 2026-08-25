@@ -134,13 +134,6 @@ export const TWO_TILE_TREES: readonly { canopy: number; trunk: number }[] = [
   { canopy: 4, trunk: 16 },
 ];
 
-// ── Edge transition atlas indices ───────────────────────────────────────────
-
-/**
- * Grass/dirt (Sand) boundary edge transition atlas indices.
- * Used when a Grass tile is 4-connected to a Sand tile.
- */
-export const EDGE_TRANSITIONS: readonly number[] = [12, 13, 14, 24, 26, 36, 37, 38];
 export const TERRAIN_DECORATIONS: Record<TerrainCategory, readonly number[]> = {
   // Other atlas props are intentionally disabled until they are assigned.
   forest: [],
@@ -297,27 +290,3 @@ export function selectOneTileTree(
   return atlasIndex;
 }
 
-// ── Edge transition selection ───────────────────────────────────────────────
-
-/**
- * Deterministically select a grass/dirt boundary edge transition atlas index.
- * Used when a Grass tile is 4-connected to a Sand (dirt) tile.
- *
- * @returns one of the 8 edge indices [12,13,14,24,26,36,37,38] or null.
- */
-export function selectEdgeTransition(
-  wx: number,
-  wy: number,
-  seed: number,
-  atlasCount: number,
-): number | null {
-  if (EDGE_TRANSITIONS.length === 0) return null;
-
-  const h = tileHash(wx, wy, seed + 66666);
-  const idx = (h * EDGE_TRANSITIONS.length * 1000) | 0;
-  const atlasIndex = EDGE_TRANSITIONS[idx % EDGE_TRANSITIONS.length];
-
-  if (atlasIndex >= atlasCount) return null;
-
-  return atlasIndex;
-}

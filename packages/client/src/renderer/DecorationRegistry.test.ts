@@ -5,11 +5,9 @@ import {
   selectDecorationWithOffset,
   selectOneTileTree,
   selectTwoTileTree,
-  selectEdgeTransition,
   TERRAIN_DECORATIONS,
   ONE_TILE_TREES,
   TWO_TILE_TREES,
-  EDGE_TRANSITIONS,
   type TerrainCategory,
 } from "./DecorationRegistry.js";
 import { TileType } from "@mmo/shared";
@@ -262,27 +260,6 @@ describe("TWO_TILE_TREES", () => {
   });
 });
 
-describe("EDGE_TRANSITIONS", () => {
-  it("contains exactly [12, 13, 14, 24, 26, 36, 37, 38]", () => {
-    expect(EDGE_TRANSITIONS).toEqual([12, 13, 14, 24, 26, 36, 37, 38]);
-  });
-
-  it("has exactly 8 entries", () => {
-    expect(EDGE_TRANSITIONS.length).toBe(8);
-  });
-
-  it("all indices within valid atlas range", () => {
-    for (const idx of EDGE_TRANSITIONS) {
-      expect(idx).toBeGreaterThanOrEqual(0);
-      expect(idx).toBeLessThanOrEqual(131);
-    }
-  });
-
-  it("indices are unique", () => {
-    expect(new Set(EDGE_TRANSITIONS).size).toBe(EDGE_TRANSITIONS.length);
-  });
-});
-
 // ── Tree index reservation — verify excluded from generic lists ─────────────
 
 describe("tree indices reserved in TERRAIN_DECORATIONS", () => {
@@ -413,54 +390,5 @@ describe("selectTwoTileTree", () => {
     }
     expect(treeCount).toBeGreaterThan(0);
     expect(treeCount).toBeLessThan(total);
-  });
-});
-
-// ── selectEdgeTransition ────────────────────────────────────────────────────
-
-describe("selectEdgeTransition", () => {
-  it("is deterministic for same inputs", () => {
-    const results = Array.from({ length: 50 }, () =>
-      selectEdgeTransition(10, 20, 1337, 132),
-    );
-    const first = results[0];
-    for (const r of results) {
-      expect(r).toBe(first);
-    }
-  });
-
-  it("returns only indices from the EDGE_TRANSITIONS set", () => {
-    const validSet = new Set(EDGE_TRANSITIONS);
-    for (let x = 0; x < 200; x++) {
-      for (let y = 0; y < 10; y++) {
-        const result = selectEdgeTransition(x, y, 1337, 132);
-        if (result !== null) {
-          expect(validSet.has(result)).toBe(true);
-        }
-      }
-    }
-  });
-
-  it("returns all 8 edge indices over a large area (coverage)", () => {
-    const seen = new Set<number>();
-    for (let x = 0; x < 500; x++) {
-      for (let y = 0; y < 10; y++) {
-        const result = selectEdgeTransition(x, y, 1337, 132);
-        if (result !== null) seen.add(result);
-      }
-    }
-    // Should hit all 8 edge indices over 5000 tiles
-    for (const idx of EDGE_TRANSITIONS) {
-      expect(seen.has(idx)).toBe(true);
-    }
-  });
-
-  it("returns null when atlasCount is 0", () => {
-    expect(selectEdgeTransition(0, 0, 1337, 0)).toBeNull();
-  });
-
-  it("returns null when atlasCount is below edge index", () => {
-    // Only 10 atlas tiles loaded — none of 12/13/14/24/26/36/37/38 available
-    expect(selectEdgeTransition(0, 0, 1337, 10)).toBeNull();
   });
 });
