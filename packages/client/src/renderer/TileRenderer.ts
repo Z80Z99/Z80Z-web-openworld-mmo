@@ -1,5 +1,5 @@
 import { Graphics, Container, Sprite, Texture } from "pixi.js";
-import { TileType, CHUNK_SIZE, DEFAULT_SEED, getShoreTiles, computeNeighborMask } from "@mmo/shared";
+import { TileType, CHUNK_SIZE, DEFAULT_SEED, getShoreTiles, computeNeighborMask, getGroundEdgeTiles, isGrassFamilyTile, isSandFamilyTile } from "@mmo/shared";
 import type { Chunk } from "@mmo/shared";
 import type { Camera } from "./Camera.js";
 import { textureManager } from "./TextureManager.js";
@@ -7,7 +7,6 @@ import {
   selectDecorationWithOffset,
   selectOneTileTree,
   selectTwoTileTree,
-  selectEdgeTransition,
 } from "./DecorationRegistry.js";
 import {
   tileHash,
@@ -348,25 +347,6 @@ interface ChunkRenderState {
   waterSprites: Sprite[];
 }
 
-// ── Edge detection helper ───────────────────────────────────────────────────
-
-/**
- * Check if a Grass tile at (lx, ly) has a 4-connected Sand (dirt) neighbor
- * inside the chunk. Used to select edge transition atlas indices.
- */
-function hasAdjacentSand(tiles: number[][], lx: number, ly: number): boolean {
-  const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-  for (const [dx, dy] of dirs) {
-    const nx = lx + dx;
-    const ny = ly + dy;
-    if (nx >= 0 && nx < tiles[0]?.length && ny >= 0 && ny < tiles.length) {
-      const neighbor = tiles[ny]?.[nx];
-      if (neighbor !== undefined && isSandType(neighbor)) return true;
-    }
-  }
-  return false;
-}
-
 // ── TileRenderer ────────────────────────────────────────────────────────────
 
 /** Callback to query any tile in the world by world coordinates. */
@@ -414,21 +394,6 @@ export class TileRenderer {
         const pxPos = lx * TILE_PX;
         const py = ly * TILE_PX;
 
-        // Edge transition: Grass tile adjacent to Sand (dirt) → edge atlas index
-        if (isGrassType(tileType) && hasAdjacentSand(chunk.tiles, lx, ly)) {
-          const edgeIdx = selectEdgeTransition(wx, wy, VARIATION_SEED, atlasCount);
-          if (edgeIdx !== null) {
-            const edgeTex = textureManager.getAtlasTexture(edgeIdx);
-            if (edgeTex) {
-              const sprite = new Sprite(edgeTex);
-              sprite.x = pxPos;
-              sprite.y = py;
-              base.addChild(sprite);
-              continue;
-            }
-          }
-        }
-
         // Try spritesheet tile first (grass/sand — other terrain is procedural)
         const tex = textureManager.getTileTexture(tileType);
         if (tex) {
@@ -436,6 +401,25 @@ export class TileRenderer {
           sprite.x = pxPos;
           sprite.y = py;
           base.addChild(sprite);
+
+          // Deterministic ground-edge overlay: sand tiles fringed toward grass-family
+          // neighbors via the shared 8-neighbor bitmask (cross-chunk aware).
+          if (isSandFamilyTile(tileType)) {
+            const mask = computeNeighborMask(wx, wy, (x, y) => {
+              const t = this.getWorldTileAt(x, y);
+              return t !== null && isGrassFamilyTile(t);
+            });
+            for (const edge of getGroundEdgeTiles(mask)) {
+              const edgeTex = textureManager.getGroundEdgeTexture(edge.index);
+              if (edgeTex) {
+                const overlay = new Sprite(edgeTex);
+                overlay.x = pxPos;
+                overlay.y = py;
+                base.addChild(overlay);
+              }
+            }
+          }
+
           continue;
         }
 

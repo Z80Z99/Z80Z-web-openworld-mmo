@@ -28,12 +28,22 @@ const BATTLE_SPACING = 1;
  * Grass variants map to ground tiles 0–2; Sand (dirt visual) maps to atlas 25.
  * Everything else uses procedural rendering.
  */
+// Forest family renders grass ground textures because trees are independent
+// Layer-2 decorations (and grass↔sand transition band renders as grass canvas
+// for the mask overlay system).
 const TILE_TYPE_TO_INDEX: Record<number, number> = {
   [TileType.Grass]:         0,
   [TileType.GrassVariant1]: 1,
   [TileType.GrassVariant2]: 2,
   [TileType.Sand]:          25,
   [TileType.SandVariant1]:  25,
+  [TileType.Forest]:         0,
+  [TileType.ForestVariant1]: 1,
+  [TileType.ForestVariant2]: 2,
+  [TileType.GrassToForest]:  0,
+  [TileType.ForestToSwamp]:  0,
+  [TileType.ForestToStone]:  0,
+  [TileType.GrassToSand]:    0,
 };
 
 /**
@@ -85,6 +95,7 @@ export class TextureManager {
   private characterTextures = new Map<string, Texture>();
   private pureWaterTexture: Texture | null = null;
   private shoreTextures: Texture[] = [];
+  private groundEdgeTextures: Texture[] = [];
   private tilemapLoaded = false;
   private charactersLoaded = false;
 
@@ -154,6 +165,12 @@ export class TextureManager {
       for (const name of shoreNames) {
         const shoreTex = await Assets.load(`/assets/game-assets/${name}.png`);
         this.shoreTextures.push(shoreTex);
+      }
+
+      const edgeGrassDirtCount = 8;
+      for (let i = 1; i <= edgeGrassDirtCount; i++) {
+        const edgeTex = await Assets.load(`/assets/game-assets/edge-grass-dirt${i}.png`);
+        this.groundEdgeTextures.push(edgeTex);
       }
     } catch (e) {
       console.warn("[TextureManager] Failed to load water tiles:", e);
@@ -253,17 +270,25 @@ export class TextureManager {
     return this.shoreTextures.length;
   }
 
+  /** Get a ground-edge texture by 1-based index (1–8). Returns null if out of range. */
+  getGroundEdgeTexture(index: number): Texture | null {
+    if (index < 1 || index > this.groundEdgeTextures.length) return null;
+    return this.groundEdgeTextures[index - 1] ?? null;
+  }
+
   destroy(): void {
     for (const tex of this.tileTextures.values()) tex.destroy(true);
     for (const tex of this.atlasTextures.values()) tex.destroy(true);
     for (const tex of this.characterTextures.values()) tex.destroy(true);
     if (this.pureWaterTexture) this.pureWaterTexture.destroy(true);
     for (const tex of this.shoreTextures) tex.destroy(true);
+    for (const tex of this.groundEdgeTextures) tex.destroy(true);
     this.tileTextures.clear();
     this.atlasTextures.clear();
     this.characterTextures.clear();
     this.pureWaterTexture = null;
     this.shoreTextures = [];
+    this.groundEdgeTextures = [];
     this.tilemapLoaded = false;
     this.charactersLoaded = false;
   }
