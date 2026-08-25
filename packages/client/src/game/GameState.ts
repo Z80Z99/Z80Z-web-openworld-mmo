@@ -4,8 +4,22 @@ import {
   type ChatMessage,
   type ClientMessage,
   CHUNK_SIZE,
+  TileType,
 } from "@mmo/shared";
+import type { Chunk } from "@mmo/shared";
 import { WorldGenerator } from "@mmo/shared";
+
+/** Tile types that block movement (mirrors server's MovementSystem). */
+const BLOCKED_TILES: ReadonlySet<TileType> = new Set([
+  TileType.Water,
+  TileType.WaterVariant1,
+  TileType.WaterVariant2,
+  TileType.DeepWater,
+  TileType.DeepWaterVariant1,
+  TileType.Stone,
+  TileType.StoneVariant1,
+  TileType.StoneVariant2,
+]);
 
 /** Local player identity and transient state. */
 export interface LocalPlayer {
@@ -83,6 +97,9 @@ export class GameState {
   /** Client-side chunk prediction generator (seed must match server). */
   private readonly worldGen: WorldGenerator;
 
+  /** Chunk cache for getTileAt() — generateChunk() is expensive, never re-generate. */
+  private readonly tileQueryCache = new Map<string, Chunk>();
+
   /** Set of "cx,cy" keys for chunks the server has pushed. */
   private readonly serverChunks = new Set<string>();
 
@@ -114,11 +131,35 @@ export class GameState {
     this.localPlayer.level = state.level;
   }
 
-  /** Client-side predicted movement (applied immediately before server ack). */
+  /**
+   * Client-side predicted movement with collision detection.
+   * Checks if target tile is walkable before applying movement.
+   */
   predictMove(dx: number, dy: number, speed: number, dt: number): void {
     if (!this.localPlayer) return;
-    this.localPlayer.x += dx * speed * dt;
-    this.localPlayer.y += dy * speed * dt;
+    const newX = this.localPlayer.x + dx * speed * dt;
+    const newY = this.localPlayer.y + dy * speed * dt;
+    // Only move if target tile is walkable
+    if (this.validateTerrain(newX, newY)) {
+      this.localPlayer.x = newX;
+      this.localPlayer.y = newY;
+    }
+  }
+
+  /**
+   * Validate that a world position is on walkable terrain.
+   * Mirrors server's MovementSystem.validateTerrain().
+   */
+  validateTerrain(x: number, y: number): boolean {
+    const tileX = Math.floor(x);
+    const tileY = Math.floor(y);
+    const chunkX = Math.floor(tileX / CHUNK_SIZE);
+    const chunkY = Math.floor(tileY / CHUNK_SIZE);
+    const localX = ((tileX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const localY = ((tileY % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const chunk = this.worldGen.generateChunk(chunkX, chunkY);
+    const tile = chunk.tiles[localY][localX];
+    return !BLOCKED_TILES.has(tile);
   }
 
   /* ── Remote players ── */
@@ -224,6 +265,35 @@ export class GameState {
   /** Client-side predicted chunk (same seed as server). */
   predictChunk(cx: number, cy: number) {
     return this.worldGen.generateChunk(cx, cy);
+  }
+
+  /**
+   * Get any tile in the world by world coordinates (cross-chunk aware).
+   * Used by TileRenderer for deterministic shore bitmask computation.
+   * Returns null if the tile cannot be determined.
+   *
+   * Chunk results are cached: generateChunk() is a full noise re-sample
+   * (~10k noise calls), and shore rendering queries it thousands of times
+   * per chunk — without caching the main thread stalls on first render.
+   */
+  getTileAt(wx: number, wy: number): TileType | null {
+    const tileX = Math.floor(wx);
+    const tileY = Math.floor(wy);
+    const chunkX = Math.floor(tileX / CHUNK_SIZE);
+    const chunkY = Math.floor(tileY / CHUNK_SIZE);
+    const localX = ((tileX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const localY = ((tileY % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const key = `${chunkX},${chunkY}`;
+    let chunk = this.tileQueryCache.get(key);
+    if (!chunk) {
+      try {
+        chunk = this.worldGen.generateChunk(chunkX, chunkY);
+      } catch {
+        return null;
+      }
+      this.tileQueryCache.set(key, chunk);
+    }
+    return chunk.tiles[localY]?.[localX] ?? null;
   }
 
   /** Derive which chunk coordinates a world-tile position belongs to. */

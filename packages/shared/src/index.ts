@@ -28,6 +28,7 @@ export {
   OFFLINE_CAP_HOURS,
   MAX_TRADE_ITEMS,
   MAX_CRAFT_INPUTS,
+  DEFAULT_SEED,
 } from "./types/constants.js";
 
 // World generation
@@ -38,8 +39,22 @@ export {
   DEFAULT_CONFIG,
   normalise,
   lookupBiome,
+  lookupBiomeLayered,
   biomeToTile,
+  biomeToVariantTile,
   resolveTile,
+  Direction,
+  DIRECTION_NAMES,
+  DIRECTION_MASK,
+  registerShoreRule,
+  getShoreRule,
+  clearShoreRules,
+  getShoreTiles,
+  getMaskFromNeighbors,
+  getNeighborsFromMask,
+  maskToBinary,
+  getActiveDirections,
+  computeNeighborMask,
 } from "./world-gen/index.js";
 
-export type { Chunk, WorldGenConfig } from "./world-gen/index.js";
+export type { Chunk, WorldGenConfig, LayeredBiomeParams, ShoreTile, ShoreRule } from "./world-gen/index.js";

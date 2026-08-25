@@ -1,5 +1,5 @@
 import { Application, Container } from "pixi.js";
-import { MOVE_SPEED, CHUNK_SIZE } from "@mmo/shared";
+import { MOVE_SPEED, CHUNK_SIZE, DEFAULT_SEED } from "@mmo/shared";
 
 import { Camera, TileRenderer, EntityRenderer, MobRenderer, TILE_PX, textureManager } from "./renderer/index.js";
 import { NetworkManager } from "./network/index.js";
@@ -9,7 +9,7 @@ import { GameState } from "./game/index.js";
 import { HUD, CombatUI, IdleUI, MobileUI, QuestUI, CraftingUI, ShopUI, TradeUI, MountUI, TitleUI, TutorialOverlay, ResponsiveLayout } from "./ui/index.js";
 
 /* ── Configuration ── */
-const SEED = 42;
+const SEED = DEFAULT_SEED;
 const BACKGROUND_COLOR = 0x1a1a2e;
 const SERVER_URL = "ws://localhost:2567";
 
@@ -29,15 +29,18 @@ async function main() {
   if (!container) throw new Error("Missing #game-container element");
   container.appendChild(app.canvas);
 
-  // Load game textures (spritesheets)
-  await textureManager.load();
-
   // Game state
   const gameState = new GameState(SEED);
+
+  // Load character sprites (Kenney roguelikeChar_transparent.png)
+  await textureManager.load();
 
   // World stage (all game world rendering happens here)
   const worldStage = new Container();
   app.stage.addChild(worldStage);
+
+  // Zoom in for closer view
+  worldStage.scale.set(1.5);
 
   // Camera
   const camera = new Camera(
@@ -49,6 +52,8 @@ async function main() {
 
   // Tile renderer
   const tileRenderer = new TileRenderer(worldStage, camera);
+  // Wire cross-chunk tile lookup for deterministic shore bitmask rendering
+  tileRenderer.setWorldTileQuery((wx, wy) => gameState.getTileAt(wx, wy));
 
   // Entity renderer (players)
   const entityRenderer = new EntityRenderer(worldStage, gameState);
@@ -451,8 +456,8 @@ async function main() {
         const dx = mob.x - local.x;
         const dy = mob.y - local.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        // Simple aggro heuristic: mobs within 3 tiles that are moving toward player
-        const isAggro = dist <= 3;
+        // Simple aggro heuristic: mobs within 5 tiles (matches server AGGRO_RANGE)
+        const isAggro = dist <= 5;
         mobRenderer.updateMobState(id, { ...mob, isAggro });
       }
     }

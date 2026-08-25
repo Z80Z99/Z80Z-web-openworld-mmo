@@ -114,7 +114,13 @@ export function waterShimmer(
 // ── Animated tile detection ─────────────────────────────────────────────────
 
 /** Set of tile types that require per-frame animation updates. */
-const ANIMATED_TYPES = new Set<number>([TileType.Water, TileType.DeepWater]);
+const ANIMATED_TYPES = new Set<number>([
+  TileType.Water,
+  TileType.DeepWater,
+  TileType.WaterVariant1,
+  TileType.WaterVariant2,
+  TileType.DeepWaterVariant1,
+]);
 
 /** Returns true when the tile type needs animated rendering (water shimmer). */
 export function isAnimatedTile(tileType: number): boolean {

@@ -1,120 +1,272 @@
-import { Assets, Texture, Rectangle } from "pixi.js";
+﻿import { Assets, Texture, Rectangle } from "pixi.js";
 import { TileType } from "@mmo/shared";
 
-/** Tile size in pixels (Kenney packs use 16x16). */
+/**
+ * Tiny Town tilemap spritesheet layout:
+ * 12 columns x 11 rows, 16px tiles, 0 spacing
+ * Total: 132 tiles (indices 0–131)
+ *
+ * All 132 tiles are indexed at load time. Ground-type mapping and
+ * decoration selection live in separate modules; TextureManager is
+ * responsible only for slicing the sheet into reusable Texture objects.
+ */
+const TILEMAP_SHEET = "/assets/tiny-town/Tilemap/tilemap_packed.png";
+const CHARACTER_SHEET = "/assets/characters/roguelikeChar_transparent.png";
+const BATTLE_SHEET = "/assets/kenney_tiny-battle/Tilemap/tilemap_packed.png";
 const TILE_SIZE = 16;
-/** Spacing between tiles in spritesheet (1px). */
-const TILE_SPACING = 1;
+const SPACING = 0;
+export const TILEMAP_COLS = 12;
+export const TILEMAP_ROWS = 11;
+export const TOTAL_ATLAS_TILES = TILEMAP_COLS * TILEMAP_ROWS; // 132
+
+/** Tiny Battle tilemap: 18 cols × 11 rows, 1px spacing */
+const BATTLE_COLS = 18;
+const BATTLE_SPACING = 1;
 
 /**
- * Maps game TileType values to tile indices in Kenney Tiny Town tileset.
- * Tileset layout: 12 columns × 11 rows (132 tiles total).
- * Index 0 = top-left, counting left→right, top→bottom.
+ * Map TileType to Tiny Town tilemap index.
+ * Grass variants map to ground tiles 0–2; Sand (dirt visual) maps to atlas 25.
+ * Everything else uses procedural rendering.
  */
 const TILE_TYPE_TO_INDEX: Record<number, number> = {
-  [TileType.Grass]: 0,       // grass tile
-  [TileType.Water]: 27,      // water tile
-  [TileType.Sand]: 12,       // sand/dirt tile
-  [TileType.Stone]: 36,      // stone tile
-  [TileType.Forest]: 3,      // tree/forest tile
-  [TileType.Snow]: 54,       // snow tile
-  [TileType.DeepWater]: 28,  // deep water tile
-  [TileType.Swamp]: 15,      // swamp/mud tile
-  [TileType.Ice]: 55,        // ice tile
+  [TileType.Grass]:         0,
+  [TileType.GrassVariant1]: 1,
+  [TileType.GrassVariant2]: 2,
+  [TileType.Sand]:          25,
+  [TileType.SandVariant1]:  25,
 };
 
 /**
- * Character sprite indices in Kenney Roguelike Characters spritesheet.
- * The spritesheet contains multiple 16x16 characters arranged in a grid.
+ * Tiny Battle water tile indices (18-col grid, 1px spacing):
+ *   37 = pure water (main)
+ *
+ * Concave shore tiles (凹岸 — water on edge, land in center):
+ *   18 = 左上凹岸 (top-left)
+ *   19 = 正上凹岸 (top-center)
+ *   20 = 右上凹岸 (top-right)
+ *   36 = 正左凹岸 (left-center)
+ *   38 = 正右凹岸 (right-center)
+ *   54 = 左下凹岸 (bottom-left)
+ *   55 = 正下凹岸 (bottom-center)
+ *   56 = 右下凹岸 (bottom-right)
+ *
+ * Convex shore tiles (凸岸 — land on edge, water in center):
+ *   90 = 右下凸岸 (bottom-right)
+ *   91 = 左下凸岸 (bottom-left)
+ *   92 = 左上凸岸 (top-left)
+ *   93 = 右上凸岸 (top-right)
  */
-const CHARACTER_INDICES = {
-  player: 0,      // first character (blue/magenta)
-  remote: 4,      // different colored character
-  wolf: 12,       // wolf-like creature
-  scorpion: 16,   // scorpion-like creature
-  skeleton: 20,   // skeleton
-  slime: 24,      // slime
+export const WATER_TILES = {
+  pure: [0],  // water1.png
+  shore: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],  // shore1-8 + convex-shore1-4
+} as const;
+
+/** Character sprite indices in Kenney roguelikeChar_transparent.png
+ *  918x203 image, 16px tiles, 1px spacing = 54 columns x 12 rows
+ *  Each character type is in a separate row, starting at col 0 */
+const CHARACTER_SHEET_COLS = 54;
+const CHARACTER_INDICES: Record<string, number> = {
+  player: 0,       // row 0, col 0
+  wolf: 54,        // row 1, col 0
+  scorpion: 108,   // row 2, col 0
+  skeleton: 162,   // row 3, col 0
+  slime: 216,      // row 4, col 0
 };
 
 /**
- * Manages loading and caching of game textures from spritesheets.
- * Handles slicing Kenney-format spritesheets (16x16, 1px spacing).
+ * TextureManager — loads Kenney Tiny Town tilemap + character sprites.
+ *
+ * All 132 atlas tiles are sliced and stored for use by the decoration
+ * system. Grass TileType textures are also stored for ground rendering.
  */
 export class TextureManager {
   private tileTextures = new Map<number, Texture>();
+  private atlasTextures = new Map<number, Texture>();
   private characterTextures = new Map<string, Texture>();
-  private loaded = false;
+  private pureWaterTexture: Texture | null = null;
+  private shoreTextures: Texture[] = [];
+  private tilemapLoaded = false;
+  private charactersLoaded = false;
 
-  /** Load all game textures from asset files. */
   async load(): Promise<void> {
-    if (this.loaded) return;
-
-    // Load tileset
-    const tilesetTexture = await Assets.load("/assets/tiles/tilemap_packed.png");
-    this.sliceTileset(tilesetTexture);
-
-    // Load character spritesheet
-    const charTexture = await Assets.load("/assets/characters/roguelikeChar_transparent.png");
-    this.sliceCharacters(charTexture);
-
-    this.loaded = true;
+    await Promise.all([this.loadTilemap(), this.loadCharacters(), this.loadBattleWater()]);
   }
 
-  /** Get texture for a tile type. Falls back to magenta if missing. */
-  getTileTexture(type: number): Texture {
-    return this.tileTextures.get(type) ?? this.tileTextures.get(0)!;
+  private async loadTilemap(): Promise<void> {
+    try {
+      const sheet = await Assets.load(TILEMAP_SHEET);
+      // Load ground tiles by TileType
+      for (const [typeStr, index] of Object.entries(TILE_TYPE_TO_INDEX)) {
+        const tileType = parseInt(typeStr);
+        const col = index % TILEMAP_COLS;
+        const row = Math.floor(index / TILEMAP_COLS);
+        const x = col * TILE_SIZE;
+        const y = row * TILE_SIZE;
+        const frame = new Rectangle(x, y, TILE_SIZE, TILE_SIZE);
+        const tex = new Texture({ source: sheet.source, frame });
+        this.tileTextures.set(tileType, tex);
+      }
+      // Index all 132 atlas tiles (flat index 0–131)
+      for (let i = 0; i < TOTAL_ATLAS_TILES; i++) {
+        const col = i % TILEMAP_COLS;
+        const row = Math.floor(i / TILEMAP_COLS);
+        const x = col * TILE_SIZE;
+        const y = row * TILE_SIZE;
+        const frame = new Rectangle(x, y, TILE_SIZE, TILE_SIZE);
+        const tex = new Texture({ source: sheet.source, frame });
+        this.atlasTextures.set(i, tex);
+      }
+      this.tilemapLoaded = true;
+    } catch {
+      console.warn("[TextureManager] Failed to load Tiny Town tilemap, using procedural fallback");
+      this.tilemapLoaded = false;
+    }
   }
 
-  /** Get texture for a character/mob type. */
-  getCharacterTexture(type: string): Texture {
-    return this.characterTextures.get(type) ?? this.characterTextures.get("player")!;
+  private async loadCharacters(): Promise<void> {
+    try {
+      const sheet = await Assets.load(CHARACTER_SHEET);
+      for (const [key, index] of Object.entries(CHARACTER_INDICES)) {
+        const col = index % CHARACTER_SHEET_COLS;
+        const row = Math.floor(index / CHARACTER_SHEET_COLS);
+        const x = col * (TILE_SIZE + 1); // 1px spacing for characters
+        const y = row * (TILE_SIZE + 1);
+        const frame = new Rectangle(x, y, TILE_SIZE, TILE_SIZE);
+        const tex = new Texture({ source: sheet.source, frame });
+        this.characterTextures.set(key, tex);
+      }
+      this.charactersLoaded = true;
+    } catch {
+      console.warn("[TextureManager] Failed to load character spritesheet, using procedural fallback");
+      this.charactersLoaded = false;
+    }
   }
 
-  /** Check if textures are loaded. */
+  private async loadBattleWater(): Promise<void> {
+    try {
+      this.pureWaterTexture = await Assets.load("/assets/game-assets/water1.png");
+
+      const shoreNames = [
+        "shore1", "shore2", "shore3", "shore4", "shore5", "shore6", "shore7", "shore8",
+        "convex-shore1", "convex-shore2", "convex-shore3", "convex-shore4"
+      ];
+      
+      for (const name of shoreNames) {
+        const shoreTex = await Assets.load(`/assets/game-assets/${name}.png`);
+        this.shoreTextures.push(shoreTex);
+      }
+    } catch (e) {
+      console.warn("[TextureManager] Failed to load water tiles:", e);
+    }
+  }
+
   isLoaded(): boolean {
-    return this.loaded;
+    return this.tilemapLoaded || this.charactersLoaded;
   }
 
-  /* ── Private ── */
-
-  /** Slice tileset spritesheet into individual tile textures. */
-  private sliceTileset(sheet: Texture): void {
-    const source = sheet.source;
-    const cols = 12;
-    // const rows = 11;
-
-    for (const [typeStr, index] of Object.entries(TILE_TYPE_TO_INDEX)) {
-      const type = Number(typeStr);
-      const col = index % cols;
-      const row = Math.floor(index / cols);
-
-      const x = col * (TILE_SIZE + TILE_SPACING);
-      const y = row * (TILE_SIZE + TILE_SPACING);
-
-      const frame = new Rectangle(x, y, TILE_SIZE, TILE_SIZE);
-      const texture = new Texture({ source, frame });
-      this.tileTextures.set(type, texture);
-    }
+  isTilemapLoaded(): boolean {
+    return this.tilemapLoaded;
   }
 
-  /** Slice character spritesheet into individual character textures. */
-  private sliceCharacters(sheet: Texture): void {
-    const source = sheet.source;
-    const cols = 8; // roguelike chars are 8 per row
+  /** Get a tile texture by TileType. Returns null if not available. */
+  getTileTexture(type: number): Texture | null {
+    return this.tileTextures.get(type) ?? null;
+  }
 
-    for (const [name, index] of Object.entries(CHARACTER_INDICES)) {
-      const col = index % cols;
-      const row = Math.floor(index / cols);
+  /** Get an atlas texture by flat index (0–131). Returns null if not loaded. */
+  getAtlasTexture(atlasIndex: number): Texture | null {
+    return this.atlasTextures.get(atlasIndex) ?? null;
+  }
 
-      const x = col * (TILE_SIZE + TILE_SPACING);
-      const y = row * (TILE_SIZE + TILE_SPACING);
+  /** Whether a given atlas index has a loaded texture. */
+  hasAtlasIndex(atlasIndex: number): boolean {
+    return this.atlasTextures.has(atlasIndex);
+  }
 
-      const frame = new Rectangle(x, y, TILE_SIZE, TILE_SIZE);
-      const texture = new Texture({ source, frame });
-      this.characterTextures.set(name, texture);
-    }
+  /** Number of loaded atlas tiles. */
+  get atlasCount(): number {
+    return this.atlasTextures.size;
+  }
+
+  /**
+   * Get the atlas index for a given TileType, or null if not mapped.
+   * Exposed so callers can look up ground tile atlas indices directly.
+   */
+  getAtlasIndexForTileType(tileType: number): number | null {
+    return TILE_TYPE_TO_INDEX[tileType] ?? null;
+  }
+
+  /** Get a tree texture by index (0-based into treeTextures array). */
+  getTreeTexture(index: number): Texture | null {
+    const count = this.atlasTextures.size;
+    if (count === 0) return null;
+    return this.atlasTextures.get(index % count) ?? null;
+  }
+
+  /** Number of available tree textures (legacy — returns atlas count). */
+  get treeCount(): number {
+    return this.atlasTextures.size;
+  }
+
+  /** Get a character texture by type (player, remote, wolf, scorpion, skeleton, slime). */
+  getCharacterTexture(type: string): Texture | null {
+    return this.characterTextures.get(type) ?? null;
+  }
+
+  /** Get pure water texture. */
+  getPureWaterTexture(): Texture | null {
+    return this.pureWaterTexture;
+  }
+
+  // ── Shore texture lookup by name ──────────────────────────────────────
+
+  /**
+   * Name → flat-index mapping for the shoreTextures array.
+   *   shore1–shore8        → 0–7   (concave, one per direction)
+   *   convex-shore1–4      → 8–11  (convex corners)
+   */
+  private static readonly SHORE_NAME_TO_INDEX: Record<string, number> = {
+    shore1: 0, shore2: 1, shore3: 2, shore4: 3,
+    shore5: 4, shore6: 5, shore7: 6, shore8: 7,
+    "convex-shore1": 8, "convex-shore2": 9,
+    "convex-shore3": 10, "convex-shore4": 11,
+  };
+
+  /**
+   * Get a shore texture by name (e.g. "shore1", "convex-shore3").
+   * Returns null if the name is unknown or textures are not loaded.
+   */
+  getShoreTextureByName(name: string): Texture | null {
+    const idx = TextureManager.SHORE_NAME_TO_INDEX[name];
+    if (idx === undefined || idx >= this.shoreTextures.length) return null;
+    return this.shoreTextures[idx];
+  }
+
+  /** Get a shore texture by flat index (0–11). */
+  getShoreTexture(index: number): Texture | null {
+    if (this.shoreTextures.length === 0) return null;
+    return this.shoreTextures[index % this.shoreTextures.length];
+  }
+
+  /** Number of loaded shore textures. */
+  get shoreCount(): number {
+    return this.shoreTextures.length;
+  }
+
+  destroy(): void {
+    for (const tex of this.tileTextures.values()) tex.destroy(true);
+    for (const tex of this.atlasTextures.values()) tex.destroy(true);
+    for (const tex of this.characterTextures.values()) tex.destroy(true);
+    if (this.pureWaterTexture) this.pureWaterTexture.destroy(true);
+    for (const tex of this.shoreTextures) tex.destroy(true);
+    this.tileTextures.clear();
+    this.atlasTextures.clear();
+    this.characterTextures.clear();
+    this.pureWaterTexture = null;
+    this.shoreTextures = [];
+    this.tilemapLoaded = false;
+    this.charactersLoaded = false;
   }
 }
 
-/** Singleton texture manager. */
 export const textureManager = new TextureManager();
