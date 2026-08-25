@@ -673,12 +673,12 @@ describe("tile semantic mapping", () => {
     }
   });
 
-  it("all 38 TileType values remain defined", () => {
+  it("all 39 TileType values remain defined", () => {
     const values = Object.values(TileType).filter((v) => typeof v === "number") as number[];
-    expect(values).toHaveLength(38);
+    expect(values).toHaveLength(39);
     // Verify min/max range
     expect(Math.min(...values)).toBe(0);
-    expect(Math.max(...values)).toBe(37);
+    expect(Math.max(...values)).toBe(38);
   });
 });
 

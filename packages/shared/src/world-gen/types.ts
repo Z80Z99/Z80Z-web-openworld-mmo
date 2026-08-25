@@ -45,6 +45,9 @@ export enum TileType {
   WaterVariant1 = 35,
   WaterVariant2 = 36,
   DeepWaterVariant1 = 37,
+
+  // Features
+  GravelPath = 38,
 }
 
 /** High-level biome categories derived from noise layers. */

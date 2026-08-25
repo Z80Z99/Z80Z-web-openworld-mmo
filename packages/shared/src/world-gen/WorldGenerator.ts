@@ -16,6 +16,7 @@ import {
   biomeToVariantTile,
 } from "./biomes.js";
 import type { LayeredBiomeParams } from "./biomes.js";
+import { applyGravelPaths } from "./path-rules.js";
 
 /**
  * Deterministic world-generation kernel.
@@ -135,6 +136,9 @@ export class WorldGenerator {
         tiles[ly] = row;
       }
     }
+
+    // Third pass: overlay deterministic gravel paths on strict grass tiles.
+    applyGravelPaths(tiles, cx, cy, this.seed);
 
     return { tiles, cx, cy };
   }

@@ -58,6 +58,12 @@ export {
   isGrassFamilyTile,
   isSandFamilyTile,
   getGroundEdgeTiles,
+  hash01,
+  getAnchorPoint,
+  segmentExists,
+  isPathTileAt,
+  applyGravelPaths,
+  DEFAULT_PATH_CONFIG,
 } from "./world-gen/index.js";
 
-export type { Chunk, WorldGenConfig, LayeredBiomeParams, ShoreTile, ShoreRule, GroundEdgeTile } from "./world-gen/index.js";
+export type { Chunk, WorldGenConfig, LayeredBiomeParams, ShoreTile, ShoreRule, GroundEdgeTile, PathLatticeConfig } from "./world-gen/index.js";

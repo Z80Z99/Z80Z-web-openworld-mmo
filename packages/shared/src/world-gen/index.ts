@@ -37,3 +37,12 @@ export {
   isSandFamilyTile,
   getGroundEdgeTiles,
 } from "./shore-rules.js";
+export {
+  hash01,
+  getAnchorPoint,
+  segmentExists,
+  isPathTileAt,
+  applyGravelPaths,
+  DEFAULT_PATH_CONFIG,
+  type PathLatticeConfig,
+} from "./path-rules.js";
