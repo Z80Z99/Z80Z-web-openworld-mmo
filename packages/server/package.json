@@ -14,9 +14,7 @@
     "@mmo/shared": "*",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.10.0",
-    "colyseus": "^0.15.0",
-    "uuid": "^11.0.0",
-    "ws": "^8.18.0"
+    "uuid": "^11.0.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

@@ -9,7 +9,6 @@
     "test": "vitest run --reporter verbose"
   },
   "dependencies": {
-    "colyseus": "^0.15.0",
     "@colyseus/schema": "^2.0.0",
     "fastnoise-lite": "^1.1.1"
   }
