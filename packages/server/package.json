@@ -9,19 +9,20 @@
     "start": "node dist/server/GameServer.js"
   },
   "dependencies": {
-    "@mmo/shared": "*",
     "@colyseus/core": "^0.15.0",
     "@colyseus/ws-transport": "^0.15.0",
-    "colyseus": "^0.15.0",
-    "better-sqlite3": "^11.0.0",
+    "@mmo/shared": "*",
     "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.10.0",
+    "colyseus": "^0.15.0",
     "uuid": "^11.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.0",
     "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^7.6.0",
     "@types/uuid": "^10.0.0",
-    "colyseus.js": "^0.15.0"
+    "colyseus.js": "^0.15.0",
+    "prebuild-install": "^7.1.3"
   }
 }

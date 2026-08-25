@@ -14,8 +14,9 @@ import {
 
 const MAX_MOBS_PER_CHUNK = 5;
 const RESPAWN_TIME_MS = 30_000;
-const AGGRO_RANGE = 3; // tiles
-const LEASH_RANGE = 10; // tiles
+const AGGRO_RANGE = 5; // tiles — how close a mob notices a player
+const LEASH_RANGE = 30; // tiles — how far a mob will chase before giving up
+const COMBAT_LEASH_TIMEOUT = 5000; // ms — how long a mob maintains aggro after leaving combat range
 const PATROL_RANGE = 5; // tiles
 const MOB_SPEED = 2; // tiles per second
 const MOB_ATTACK_RANGE = 1.5; // tiles
@@ -165,10 +166,16 @@ export class MobSpawner {
         } else {
           const dist = this.distance(mob.x, mob.y, target.x, target.y);
           if (dist > LEASH_RANGE) {
-            // Leashed — return to spawn
-            mob.aggroTarget = null;
-            mob.aiState = "patrol";
-            mob.patrolTarget = { x: mob.spawnX, y: mob.spawnY };
+            // Check combat leash — maintain aggro briefly after leaving combat range
+            const timeSinceLastCombat = now - mob.lastCombatTime;
+            if (timeSinceLastCombat < COMBAT_LEASH_TIMEOUT) {
+              // Still within combat leash timeout — keep chasing
+            } else {
+              // Leashed — return to spawn
+              mob.aggroTarget = null;
+              mob.aiState = "patrol";
+              mob.patrolTarget = { x: mob.spawnX, y: mob.spawnY };
+            }
           }
         }
       }
@@ -223,6 +230,7 @@ export class MobSpawner {
         chunkY: cy,
         deathTime: 0,
         lastAttackTime: 0,
+        lastCombatTime: 0,
         synced: false,
       };
     }
@@ -276,6 +284,7 @@ export class MobSpawner {
           now,
         );
         if (attackEvents) {
+          mob.lastCombatTime = now;
           events.push(...attackEvents);
         }
         return;
@@ -313,6 +322,7 @@ export class MobSpawner {
     mob.patrolTarget = null;
     mob.deathTime = 0;
     mob.lastAttackTime = 0;
+    mob.lastCombatTime = 0;
 
     // Respawn at a random position near spawn
     const offset = (Math.random() - 0.5) * 4;

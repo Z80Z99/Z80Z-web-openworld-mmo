@@ -224,6 +224,8 @@ export interface MobInstance {
   deathTime: number;
   /** Timestamp of last attack. */
   lastAttackTime: number;
+  /** Timestamp of last successful attack on aggro target (for combat leash). */
+  lastCombatTime: number;
   /** Whether entity is synced to clients. */
   synced: boolean;
 }

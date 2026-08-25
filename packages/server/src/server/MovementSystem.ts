@@ -29,8 +29,13 @@ export interface MovementCommand {
 /** Tile types that block movement. */
 const BLOCKED_TILES: ReadonlySet<TileType> = new Set([
   TileType.Water,
+  TileType.WaterVariant1,
+  TileType.WaterVariant2,
   TileType.DeepWater,
+  TileType.DeepWaterVariant1,
   TileType.Stone, // Mountains biome
+  TileType.StoneVariant1,
+  TileType.StoneVariant2,
 ]);
 
 /**

@@ -10,6 +10,7 @@ import {
   TICK_RATE,
   MOVE_SPEED,
   CHUNK_SIZE,
+  DEFAULT_SEED,
 } from "@mmo/shared";
 import type {
   AuthRegister,
@@ -85,7 +86,7 @@ export class GameRoom extends Room<RoomState> {
     this.auth = new Auth(this.db);
 
     // World generator
-    const seed = options.seed ?? 42;
+    const seed = options.seed ?? DEFAULT_SEED;
     this.worldGen = new WorldGenerator(seed);
 
     // Initialize Colyseus state

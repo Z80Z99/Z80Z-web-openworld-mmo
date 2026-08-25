@@ -2,6 +2,7 @@ import { Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { GameDatabase } from "../db/index.js";
 import { GameRoom } from "./GameRoom.js";
+import { DEFAULT_SEED } from "@mmo/shared";
 
 const DEFAULT_PORT = 2567;
 
@@ -34,7 +35,7 @@ export function createGameServer(options: GameServerOptions = {}): {
 } {
   const port = options.port ?? (parseInt(process.env.COLYSEUS_PORT ?? "", 10) || DEFAULT_PORT);
   const dbPath = options.dbPath ?? ":memory:";
-  const seed = options.seed ?? 42;
+  const seed = options.seed ?? DEFAULT_SEED;
 
   // Initialize database
   const db = new GameDatabase({ path: dbPath });
