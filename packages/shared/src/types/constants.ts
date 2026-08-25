@@ -18,3 +18,6 @@ export const MAX_TRADE_ITEMS = 10;
 
 /** Max input items for crafting */
 export const MAX_CRAFT_INPUTS = 3;
+
+/** Default world generation seed shared between client and server. */
+export const DEFAULT_SEED = 20260824;

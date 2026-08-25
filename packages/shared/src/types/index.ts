@@ -25,4 +25,5 @@ export {
   OFFLINE_CAP_HOURS,
   MAX_TRADE_ITEMS,
   MAX_CRAFT_INPUTS,
+  DEFAULT_SEED,
 } from "./constants.js";
