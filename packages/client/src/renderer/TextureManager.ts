@@ -167,7 +167,7 @@ export class TextureManager {
         this.shoreTextures.push(shoreTex);
       }
 
-      const edgeGrassDirtCount = 8;
+      const edgeGrassDirtCount = 12;
       for (let i = 1; i <= edgeGrassDirtCount; i++) {
         const edgeTex = await Assets.load(`/assets/game-assets/edge-grass-dirt${i}.png`);
         this.groundEdgeTextures.push(edgeTex);
