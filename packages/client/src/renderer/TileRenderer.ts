@@ -105,6 +105,13 @@ export class TileRenderer {
   private readonly camera: Camera;
   private readonly chunks = new Map<string, ChunkRenderState>();
   private getWorldTileAt: WorldTileQuery = () => null;
+  /**
+   * Canopy sprites owed to a chunk that has not rendered yet: trunks placed
+   * at another chunk's ly === 0 reach one row into THIS chunk. Keyed by the
+   * owner chunk key ("cx,cy"), then by the source (trunk) chunk key so that
+   * pruning the trunk chunk drops exactly its own IOUs.
+   */
+  private readonly pendingCanopies = new Map<string, Map<string, Array<{ atlasIndex: number; lx: number; ly: number }>>>();
 
   constructor(stage: Container, camera: Camera) {
     this.stage = stage;
@@ -217,6 +224,24 @@ export class TileRenderer {
     /** Set of (ly * CHUNK_SIZE + lx) keys for cells that already have an atlas tree placed */
     const treePlaced = new Set<number>();
 
+    // Collect canopies owed to this chunk by lower neighbours (trunks at
+    // their ly === 0 whose canopy cell lands here) BEFORE local placement,
+    // so cross-chunk canopies Y-sort together with locally placed decals.
+    const owedCanopies = this.pendingCanopies.get(key);
+    if (owedCanopies) {
+      for (const descriptors of owedCanopies.values()) {
+        for (const d of descriptors) {
+          const tex = textureManager.getAtlasTexture(d.atlasIndex);
+          if (!tex) continue;
+          const s = new Sprite(tex);
+          s.x = d.lx * TILE_PX;
+          s.y = d.ly * TILE_PX;
+          decoSprites.push(s);
+        }
+      }
+      this.pendingCanopies.delete(key);
+    }
+
     for (let ly = 0; ly < CHUNK_SIZE; ly++) {
       for (let lx = 0; lx < CHUNK_SIZE; lx++) {
         const tileType = chunk.tiles[ly]?.[lx];
@@ -228,28 +253,69 @@ export class TileRenderer {
         const wy = chunk.cy * CHUNK_SIZE + ly;
 
         // ── Pass 1: two-tile tree ────────────────────────────────────────
-        if (ly > 0) {
+        {
           const twoTile = selectTwoTileTree(wx, wy, VARIATION_SEED, atlasCount);
           if (twoTile !== null) {
-            const canopyLy = ly - 1;
-            const canopyKey = canopyLy * CHUNK_SIZE + lx;
+            const canopyLy = ly + twoTile.canopyDy;
+            const trunkTex = textureManager.getAtlasTexture(twoTile.trunk);
 
-            if (!consumedCanopy.has(canopyKey)) {
+            if (canopyLy >= 0) {
+              // Canopy cell inside this chunk — same-chunk placement.
+              const canopyKey = canopyLy * CHUNK_SIZE + lx;
+              if (!consumedCanopy.has(canopyKey)) {
+                const canopyTex = textureManager.getAtlasTexture(twoTile.canopy);
+                if (canopyTex && trunkTex) {
+                  const trunkSprite = new Sprite(trunkTex);
+                  trunkSprite.x = lx * TILE_PX;
+                  trunkSprite.y = ly * TILE_PX;
+                  decoSprites.push(trunkSprite);
+
+                  const canopySprite = new Sprite(canopyTex);
+                  canopySprite.x = lx * TILE_PX;
+                  canopySprite.y = canopyLy * TILE_PX;
+                  decoSprites.push(canopySprite);
+
+                  consumedCanopy.add(canopyKey);
+                  treePlaced.add(ly * CHUNK_SIZE + lx);
+                  continue;
+                }
+              }
+            } else {
+              // Cross-chunk overhang: the canopy cell belongs to the chunk
+              // above. Attach directly when that chunk already rendered,
+              // otherwise record an IOU its renderChunk will flush before
+              // local decals are placed. Either way the canopy is owned and
+              // Y-sorted by the chunk that contains its cell.
               const canopyTex = textureManager.getAtlasTexture(twoTile.canopy);
-              const trunkTex = textureManager.getAtlasTexture(twoTile.trunk);
               if (canopyTex && trunkTex) {
                 const trunkSprite = new Sprite(trunkTex);
                 trunkSprite.x = lx * TILE_PX;
                 trunkSprite.y = ly * TILE_PX;
                 decoSprites.push(trunkSprite);
-
-                const canopySprite = new Sprite(canopyTex);
-                canopySprite.x = lx * TILE_PX;
-                canopySprite.y = canopyLy * TILE_PX;
-                decoSprites.push(canopySprite);
-
-                consumedCanopy.add(canopyKey);
                 treePlaced.add(ly * CHUNK_SIZE + lx);
+
+                const ownerKey = `${chunk.cx},${chunk.cy - 1}`;
+                const ownerState = this.chunks.get(ownerKey);
+                if (ownerState) {
+                  const canopySprite = new Sprite(canopyTex);
+                  canopySprite.x = lx * TILE_PX;
+                  // canopyLy is negative here; the owner's local row is
+                  // CHUNK_SIZE + canopyLy (e.g. -1 -> bottom row 31).
+                  canopySprite.y = (CHUNK_SIZE + canopyLy) * TILE_PX;
+                  ownerState.base.addChild(canopySprite);
+                } else {
+                  let bySource = this.pendingCanopies.get(ownerKey);
+                  if (!bySource) {
+                    bySource = new Map();
+                    this.pendingCanopies.set(ownerKey, bySource);
+                  }
+                  let descriptors = bySource.get(key);
+                  if (!descriptors) {
+                    descriptors = [];
+                    bySource.set(key, descriptors);
+                  }
+                  descriptors.push({ atlasIndex: twoTile.canopy, lx, ly: CHUNK_SIZE - 1 });
+                }
                 continue;
               }
             }
@@ -382,6 +448,15 @@ export class TileRenderer {
     this.chunks.set(key, { base, water, animatedTiles, decoSprites, waterSprites });
   }
 
+  /** Drop every canopy IOU recorded by the given (trunk) chunk key. */
+  private dropPendingCanopiesFrom(srcKey: string): void {
+    for (const [ownerKey, bySource] of this.pendingCanopies) {
+      if (bySource.delete(srcKey) && bySource.size === 0) {
+        this.pendingCanopies.delete(ownerKey);
+      }
+    }
+  }
+
   removeChunk(cx: number, cy: number): void {
     const key = `${cx},${cy}`;
     const state = this.chunks.get(key);
@@ -392,6 +467,8 @@ export class TileRenderer {
       state.water.destroy({ children: true });
       this.chunks.delete(key);
     }
+    // Canopies this chunk owed to lower neighbours must vanish with it.
+    this.dropPendingCanopiesFrom(key);
   }
 
   pruneChunks(visibleChunks: Set<string>): void {
@@ -402,6 +479,7 @@ export class TileRenderer {
         state.base.destroy({ children: true });
         state.water.destroy({ children: true });
         this.chunks.delete(key);
+        this.dropPendingCanopiesFrom(key);
       }
     }
   }
@@ -428,6 +506,7 @@ export class TileRenderer {
       state.water.destroy({ children: true });
     }
     this.chunks.clear();
+    this.pendingCanopies.clear();
   }
 
 }
