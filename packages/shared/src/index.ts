@@ -57,6 +57,8 @@ export {
   isGrassFamilyTile,
   isSandFamilyTile,
   getGroundEdgeTiles,
+  invert180,
+  getCoastalInnerTiles,
   hash01,
   getAnchorPoint,
   segmentExists,

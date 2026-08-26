@@ -347,3 +347,69 @@ export function getGroundEdgeTiles(mask: number): GroundEdgeTile[] {
 
   return result;
 }
+
+// ── Coastal Inner Transition ───────────────────────────────────────
+
+/**
+ * Rotate an 8-neighbor bitmask by 180°: N↔S, E↔W, NW↔SE, NE↔SW.
+ *
+ * Pure and total; an involution (`invert180(invert180(m)) === m`) that
+ * fixes 0 and 255.
+ */
+export function invert180(mask: number): number {
+  return (
+    ((mask & Direction.NW) !== 0 ? Direction.SE : 0) |
+    ((mask & Direction.N) !== 0 ? Direction.S : 0) |
+    ((mask & Direction.NE) !== 0 ? Direction.SW : 0) |
+    ((mask & Direction.W) !== 0 ? Direction.E : 0) |
+    ((mask & Direction.E) !== 0 ? Direction.W : 0) |
+    ((mask & Direction.SW) !== 0 ? Direction.NE : 0) |
+    ((mask & Direction.S) !== 0 ? Direction.N : 0) |
+    ((mask & Direction.SE) !== 0 ? Direction.NW : 0)
+  );
+}
+
+/**
+ * Deterministic coastal-inner transition overlays for a LAND tile whose
+ * 8-neighbor bitmask encodes which neighbours are WATER — the land-side
+ * counterpart of the water-side shore system.
+ *
+ * Renderer overlay only: callers MUST pass the original terrain mask;
+ * this module never mutates terrain and never consults shore rules.
+ *
+ * Orientation follows the edge-grass-dirt asset anatomy (opaque
+ * dirt-orange base with directional grass bands):
+ *
+ * - Sand-family centers decompose `waterMask` AS-IS, so each grass band
+ *   faces the water — a waterline fringe on terrain that already reads
+ *   as sand.
+ * - Grass-family centers decompose `invert180(waterMask)`, pointing the
+ *   band INLAND instead. Drawing the opaque dirt-base asset over grass
+ *   turns the tile sand-looking with its grass fringe blending into the
+ *   terrain behind — extending the beach one row onto grass.
+ *
+ * Both paths reuse the exact ground-edge decomposition tables, so the
+ * same mask always yields the same ordered sequence.
+ *
+ * Tiles that are neither grass- nor sand-family (stone, snow, swamp,
+ * ice, water, …) host no coastal overlay.
+ *
+ * @param centerTile Tile type of the centre cell (original terrain)
+ * @param waterMask Bitmask where each bit represents a water neighbour
+ * @returns Array of 0–4 GroundEdgeTiles (indices map to
+ *          edge-grass-dirt1..12.png via getGroundEdgeTexture)
+ */
+export function getCoastalInnerTiles(
+  centerTile: TileType,
+  waterMask: number,
+): GroundEdgeTile[] {
+  if (waterMask === 0) return [];
+
+  if (isSandFamilyTile(centerTile)) {
+    return getGroundEdgeTiles(waterMask);
+  }
+  if (isGrassFamilyTile(centerTile)) {
+    return getGroundEdgeTiles(invert180(waterMask));
+  }
+  return [];
+}

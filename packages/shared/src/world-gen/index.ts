@@ -35,6 +35,8 @@ export {
   isGrassFamilyTile,
   isSandFamilyTile,
   getGroundEdgeTiles,
+  invert180,
+  getCoastalInnerTiles,
 } from "./shore-rules.js";
 export {
   hash01,
