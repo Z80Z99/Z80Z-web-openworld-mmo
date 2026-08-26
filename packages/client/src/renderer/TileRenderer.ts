@@ -112,6 +112,14 @@ export class TileRenderer {
    * pruning the trunk chunk drops exactly its own IOUs.
    */
   private readonly pendingCanopies = new Map<string, Map<string, Array<{ atlasIndex: number; lx: number; ly: number }>>>();
+  /**
+   * Cross-chunk canopy sprites this renderer has placed into OTHER chunks'
+   * bases, tracked by the trunk chunk that owns the tree. Keyed by source
+   * (trunk) chunk key, so pruning or re-rendering a trunk chunk detaches
+   * exactly its own canopies — never orphaning a floating canopy in the
+   * owner and never stacking a duplicate on re-render.
+   */
+  private readonly crossCanopies = new Map<string, Array<{ ownerKey: string; sprite: Sprite }>>();
 
   constructor(stage: Container, camera: Camera) {
     this.stage = stage;
@@ -126,6 +134,10 @@ export class TileRenderer {
   renderChunk(chunk: Chunk): void {
     const key = `${chunk.cx},${chunk.cy}`;
     if (this.chunks.has(key)) return;
+    // Genuine re-render (previous life was pruned): detach any canopies the
+    // old life attached into surviving neighbour chunks and drop its stale
+    // IOUs, so nothing can accumulate into duplicates or float orphaned.
+    this.detachCrossChunkCanopies(key);
 
     const chunkPx = CHUNK_SIZE * TILE_PX;
     const base = new Container();
@@ -229,7 +241,7 @@ export class TileRenderer {
     // so cross-chunk canopies Y-sort together with locally placed decals.
     const owedCanopies = this.pendingCanopies.get(key);
     if (owedCanopies) {
-      for (const descriptors of owedCanopies.values()) {
+      for (const [srcKey, descriptors] of owedCanopies) {
         for (const d of descriptors) {
           const tex = textureManager.getAtlasTexture(d.atlasIndex);
           if (!tex) continue;
@@ -237,6 +249,14 @@ export class TileRenderer {
           s.x = d.lx * TILE_PX;
           s.y = d.ly * TILE_PX;
           decoSprites.push(s);
+          // Track by the trunk chunk that owns this tree so its later
+          // prune/re-render can detach exactly this sprite.
+          let tracked = this.crossCanopies.get(srcKey);
+          if (!tracked) {
+            tracked = [];
+            this.crossCanopies.set(srcKey, tracked);
+          }
+          tracked.push({ ownerKey: key, sprite: s });
         }
       }
       this.pendingCanopies.delete(key);
@@ -303,6 +323,14 @@ export class TileRenderer {
                   // CHUNK_SIZE + canopyLy (e.g. -1 -> bottom row 31).
                   canopySprite.y = (CHUNK_SIZE + canopyLy) * TILE_PX;
                   ownerState.base.addChild(canopySprite);
+                  // Track it: a later prune/re-render of THIS trunk chunk
+                  // must detach exactly this sprite from the owner.
+                  let tracked = this.crossCanopies.get(key);
+                  if (!tracked) {
+                    tracked = [];
+                    this.crossCanopies.set(key, tracked);
+                  }
+                  tracked.push({ ownerKey, sprite: canopySprite });
                 } else {
                   let bySource = this.pendingCanopies.get(ownerKey);
                   if (!bySource) {
@@ -457,6 +485,27 @@ export class TileRenderer {
     }
   }
 
+  /**
+   * Remove every cross-chunk canopy contributed by the given trunk chunk and
+   * drop its outstanding IOUs. Called when the trunk chunk is removed or
+   * pruned, and at the start of a genuine re-render, so a canopy can never
+   * outlive its tree nor be stacked twice.
+   */
+  private detachCrossChunkCanopies(srcKey: string): void {
+    const entries = this.crossCanopies.get(srcKey);
+    if (entries) {
+      for (const { ownerKey, sprite } of entries) {
+        const ownerState = this.chunks.get(ownerKey);
+        if (ownerState && !sprite.destroyed) {
+          ownerState.base.removeChild(sprite);
+        }
+        if (!sprite.destroyed) sprite.destroy();
+      }
+      this.crossCanopies.delete(srcKey);
+    }
+    this.dropPendingCanopiesFrom(srcKey);
+  }
+
   removeChunk(cx: number, cy: number): void {
     const key = `${cx},${cy}`;
     const state = this.chunks.get(key);
@@ -468,7 +517,7 @@ export class TileRenderer {
       this.chunks.delete(key);
     }
     // Canopies this chunk owed to lower neighbours must vanish with it.
-    this.dropPendingCanopiesFrom(key);
+    this.detachCrossChunkCanopies(key);
   }
 
   pruneChunks(visibleChunks: Set<string>): void {
@@ -479,7 +528,7 @@ export class TileRenderer {
         state.base.destroy({ children: true });
         state.water.destroy({ children: true });
         this.chunks.delete(key);
-        this.dropPendingCanopiesFrom(key);
+        this.detachCrossChunkCanopies(key);
       }
     }
   }
@@ -507,6 +556,7 @@ export class TileRenderer {
     }
     this.chunks.clear();
     this.pendingCanopies.clear();
+    this.crossCanopies.clear();
   }
 
 }
