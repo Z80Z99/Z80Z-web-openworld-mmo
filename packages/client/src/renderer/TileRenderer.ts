@@ -1,5 +1,5 @@
 import { Graphics, Container, Sprite, Texture } from "pixi.js";
-import { TileType, CHUNK_SIZE, DEFAULT_SEED, getShoreTiles, computeNeighborMask, getGroundEdgeTiles, isGrassFamilyTile, isSandFamilyTile } from "@mmo/shared";
+import { TileType, CHUNK_SIZE, DEFAULT_SEED, getShoreTiles, computeNeighborMask, getGroundEdgeTiles, getCoastalInnerTiles, isGrassFamilyTile, isSandFamilyTile } from "@mmo/shared";
 import type { Chunk } from "@mmo/shared";
 import type { Camera } from "./Camera.js";
 import { textureManager } from "./TextureManager.js";
@@ -151,6 +151,7 @@ export class TileRenderer {
 
           // Deterministic ground-edge overlay: sand tiles fringed toward grass-family
           // neighbors via the shared 8-neighbor bitmask (cross-chunk aware).
+          const placedEdgeIndices = new Set<number>();
           if (isSandFamilyTile(tileType)) {
             const mask = computeNeighborMask(wx, wy, (x, y) => {
               const t = this.getWorldTileAt(x, y);
@@ -163,6 +164,32 @@ export class TileRenderer {
                 overlay.x = pxPos;
                 overlay.y = py;
                 base.addChild(overlay);
+                placedEdgeIndices.add(edge.index);
+              }
+            }
+          }
+
+          // Coastal inner transition (land side): land tiles bordering water
+          // get a sand/dirt blend overlay reusing the same ground-edge assets.
+          // Sand centers fringe toward the water; grass centers turn sand-looking
+          // with the band inland. Same-index sprites are pixel-identical, so a
+          // tile never stacks the same texture twice.
+          if (isGrassFamilyTile(tileType) || isSandFamilyTile(tileType)) {
+            const waterMask = computeNeighborMask(wx, wy, (x, y) => {
+              const t = this.getWorldTileAt(x, y);
+              return t !== null && isWaterType(t);
+            });
+            if (waterMask !== 0) {
+              for (const edge of getCoastalInnerTiles(tileType, waterMask)) {
+                if (placedEdgeIndices.has(edge.index)) continue;
+                const edgeTex = textureManager.getGroundEdgeTexture(edge.index);
+                if (edgeTex) {
+                  const overlay = new Sprite(edgeTex);
+                  overlay.x = pxPos;
+                  overlay.y = py;
+                  base.addChild(overlay);
+                  placedEdgeIndices.add(edge.index);
+                }
               }
             }
           }
