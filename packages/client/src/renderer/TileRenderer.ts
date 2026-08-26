@@ -9,7 +9,6 @@ import {
   selectTwoTileTree,
 } from "./DecorationRegistry.js";
 import {
-  tileHash,
   tileColor,
   findAnimatedTiles,
   type AnimatedTile,
@@ -71,57 +70,12 @@ const BASE_COLORS: Record<number, number> = {
   [TileType.GravelPath]:     0xb8a98c,
 };
 
-// ── Decoration Palette ──────────────────────────────────────────────────────
-
-const DECO = {
-  grassBladeLight: 0x7ab860,
-  grassBladeDark:  0x4a7a38,
-  grassFlower1:    0xf0e050,
-  grassFlower2:    0xe86070,
-  grassFlower3:    0xb070d0,
-
-  trunk:       0x6b4226,
-  trunkDark:   0x4a2e1a,
-  canopyLight: 0x3a8028,
-  canopyDark:  0x1e5a10,
-  canopyTop:   0x4a9038,
-
-  pebbleLight: 0xd8c890,
-  pebbleDark:  0xc0b078,
-  shell:       0xf0e8d8,
-
-  crackDark:   0x606060,
-  crackLight:  0xa0a0a0,
-  moss:        0x506830,
-
-  sparkle:     0xffffff,
-  sparkleBlue: 0xd0e8f8,
-  snowDrift:   0xd8e0e8,
-
-  bubble:      0x809860,
-  mushRoom:    0xc06030,
-  reed:        0x607830,
-
-  waveLight:   0x60a0e8,
-  waveDark:    0x2860a0,
-
-  iceCrack:    0xa0c8e0,
-  iceGlint:    0xf0f8ff,
-
-  shoreFoam:   0xe8e0d0,
-  shoreWet:    0x708898,
-};
-
 // ── Tile Category Helpers ───────────────────────────────────────────────────
 
 function isWaterType(t: number): boolean {
   return t === TileType.Water || t === TileType.DeepWater ||
     t === TileType.WaterVariant1 || t === TileType.WaterVariant2 ||
     t === TileType.DeepWaterVariant1;
-}
-
-function isShoreType(t: number): boolean {
-  return t >= TileType.ShoreSand && t <= TileType.ShoreStone;
 }
 
 function isForestType(t: number): boolean {
@@ -131,236 +85,10 @@ function isForestType(t: number): boolean {
     t === TileType.ForestToStone;
 }
 
-function isSandType(t: number): boolean {
-  return t === TileType.Sand || t === TileType.SandVariant1 ||
-    t === TileType.ShoreSand || t === TileType.GrassToSand ||
-    t === TileType.SandToStone;
-}
-
-function isStoneType(t: number): boolean {
-  return t === TileType.Stone || t === TileType.StoneVariant1 ||
-    t === TileType.StoneVariant2 || t === TileType.ShoreStone ||
-    t === TileType.GrassToStone || t === TileType.SandToStone ||
-    t === TileType.ForestToStone || t === TileType.SwampToStone ||
-    t === TileType.StoneToSnow;
-}
-
-function isSnowType(t: number): boolean {
-  return t === TileType.Snow || t === TileType.SnowVariant1 ||
-    t === TileType.ShoreSnow || t === TileType.GrassToSnow ||
-    t === TileType.StoneToSnow || t === TileType.SnowToIce;
-}
-
-function isSwampType(t: number): boolean {
-  return t === TileType.Swamp || t === TileType.SwampVariant1 ||
-    t === TileType.ShoreSwamp || t === TileType.GrassToSwamp ||
-    t === TileType.ForestToSwamp || t === TileType.SwampToStone;
-}
-
-function isIceType(t: number): boolean {
-  return t === TileType.Ice || t === TileType.SnowToIce;
-}
-
-function isGrassType(t: number): boolean {
-  return t === TileType.Grass || t === TileType.GrassVariant1 ||
-    t === TileType.GrassVariant2 || t === TileType.ShoreGrass ||
-    t === TileType.GrassToSand || t === TileType.GrassToForest ||
-    t === TileType.GrassToSwamp || t === TileType.GrassToStone ||
-    t === TileType.GrassToSnow;
-}
-
-// ── Decoration Drawing ──────────────────────────────────────────────────────
-
-function px(g: Graphics, x: number, y: number, color: number, w = 1, h = 1): void {
-  g.rect(x, y, w, h);
-  g.fill(color);
-}
-
-/** Procedural forest tree (fallback when spritesheet unavailable). */
-function drawForestDecoration(g: Graphics, lx: number, ly: number, wx: number, wy: number): void {
-  const ox = lx * TILE_PX;
-  const oy = ly * TILE_PX;
-  const h1 = tileHash(wx, wy, VARIATION_SEED);
-  const h2 = tileHash(wx, wy, VARIATION_SEED + 1);
-  const tx = ox + 5 + (h2 * 4) | 0;
-  const ty = oy + 7;
-  px(g, tx, ty, DECO.trunk, 2, 5);
-  px(g, tx, ty, DECO.trunkDark, 1, 5);
-  px(g, tx - 2, ty - 4, DECO.canopyDark, 6, 2);
-  px(g, tx - 3, ty - 2, DECO.canopyDark, 8, 3);
-  px(g, tx - 2, ty + 1, DECO.canopyLight, 6, 1);
-  px(g, tx - 1, ty - 3, DECO.canopyTop, 3, 1);
-}
-
-function drawDecorations(g: Graphics, tileType: number, lx: number, ly: number, wx: number, wy: number): void {
-  const ox = lx * TILE_PX;
-  const oy = ly * TILE_PX;
-
-  const h1 = tileHash(wx, wy, VARIATION_SEED);
-  const h2 = tileHash(wx, wy, VARIATION_SEED + 1);
-  const h3 = tileHash(wx, wy, VARIATION_SEED + 2);
-  const h4 = tileHash(wx, wy, VARIATION_SEED + 3);
-
-  // ── Forest: no tree decorations (disabled) ────────────────────────
-  return;
-
-  // ── Grass ────────────────────────────────────────────────────────────────
-  if (isGrassType(tileType)) {
-    if (h1 > 0.35) {
-      const bx = ox + 2 + (h1 * 10) | 0;
-      const by = oy + 4 + (h2 * 8) | 0;
-      const col = h3 > 0.5 ? DECO.grassBladeLight : DECO.grassBladeDark;
-      px(g, bx, by, col);
-      px(g, bx, by - 1, col);
-      if (h2 > 0.6) px(g, bx + 1, by - 1, col);
-    }
-    if (h2 > 0.88) {
-      const fx = ox + 4 + (h3 * 8) | 0;
-      const fy = oy + 3 + (h4 * 6) | 0;
-      const fCol = h1 > 0.7 ? DECO.grassFlower1 : h1 > 0.4 ? DECO.grassFlower2 : DECO.grassFlower3;
-      px(g, fx, fy, fCol);
-      px(g, fx - 1, fy + 1, DECO.grassBladeDark);
-      px(g, fx + 1, fy + 1, DECO.grassBladeDark);
-    }
-    return;
-  }
-
-  // ── Sand ─────────────────────────────────────────────────────────────────
-  if (isSandType(tileType)) {
-    if (h1 > 0.6) {
-      const sx = ox + 2 + (h2 * 12) | 0;
-      const sy = oy + 3 + (h3 * 10) | 0;
-      px(g, sx, sy, h4 > 0.5 ? DECO.pebbleLight : DECO.pebbleDark, 2, 1);
-    }
-    if (h2 > 0.93) {
-      const sx = ox + 6 + (h3 * 4) | 0;
-      const sy = oy + 5 + (h4 * 6) | 0;
-      px(g, sx, sy, DECO.shell, 2, 1);
-      px(g, sx + 1, sy - 1, DECO.shell, 1, 1);
-    }
-    return;
-  }
-
-  // ── Stone ────────────────────────────────────────────────────────────────
-  if (isStoneType(tileType)) {
-    if (h1 > 0.5) {
-      const cx = ox + 2 + (h2 * 10) | 0;
-      const cy = oy + 3 + (h3 * 8) | 0;
-      const len = 2 + (h4 * 3) | 0;
-      for (let i = 0; i < len; i++) {
-        px(g, cx + i, cy + ((i % 2) ? 1 : 0), DECO.crackDark);
-      }
-    }
-    if (h3 > 0.88) {
-      const mx = ox + (h4 * 12) | 0;
-      const my = oy + (h1 * 12) | 0;
-      px(g, mx, my, DECO.moss, 2, 1);
-      px(g, mx + 1, my + 1, DECO.moss);
-    }
-    return;
-  }
-
-  // ── Snow ─────────────────────────────────────────────────────────────────
-  if (isSnowType(tileType)) {
-    if (h1 > 0.6) {
-      const sx = ox + 3 + (h2 * 10) | 0;
-      const sy = oy + 2 + (h3 * 10) | 0;
-      px(g, sx, sy, h4 > 0.5 ? DECO.sparkle : DECO.sparkleBlue);
-    }
-    if (h2 > 0.9) {
-      const dx = ox + (h3 * 8) | 0;
-      const dy = oy + 10 + (h4 * 4) | 0;
-      px(g, dx, dy, DECO.snowDrift, 3, 1);
-    }
-    return;
-  }
-
-  // ── Swamp ────────────────────────────────────────────────────────────────
-  if (isSwampType(tileType)) {
-    if (h1 > 0.7) {
-      const bx = ox + 4 + (h2 * 8) | 0;
-      const by = oy + 5 + (h3 * 6) | 0;
-      px(g, bx, by, DECO.bubble, 2, 1);
-      px(g, bx, by - 1, DECO.bubble);
-    }
-    if (h3 > 0.9) {
-      const mx = ox + 6 + (h4 * 4) | 0;
-      const my = oy + 6 + (h1 * 4) | 0;
-      px(g, mx, my, DECO.mushRoom, 2, 1);
-      px(g, mx, my - 1, DECO.mushRoom, 3, 1);
-      px(g, mx + 1, my + 1, DECO.reed);
-    }
-    if (h4 > 0.82) {
-      const rx = ox + 3 + (h1 * 10) | 0;
-      const ry = oy + 2;
-      px(g, rx, ry, DECO.reed, 1, 6);
-      if (h2 > 0.5) px(g, rx + 1, ry + 1, DECO.reed, 1, 4);
-    }
-    return;
-  }
-
-  // ── Ice ──────────────────────────────────────────────────────────────────
-  if (isIceType(tileType)) {
-    if (h1 > 0.55) {
-      const cx = ox + 1 + (h2 * 12) | 0;
-      const cy = oy + 2 + (h3 * 10) | 0;
-      for (let i = 0; i < 3; i++) {
-        px(g, cx + i, cy + ((i % 2) ? 1 : 0), DECO.iceCrack);
-      }
-    }
-    if (h3 > 0.85) {
-      const gx = ox + 4 + (h4 * 8) | 0;
-      const gy = oy + 3 + (h1 * 8) | 0;
-      px(g, gx, gy, DECO.iceGlint);
-    }
-    return;
-  }
-
-  // ── Gravel path: scattered pebbles (no trees — paths are cleared) ────────
-  if (tileType === TileType.GravelPath) {
-    if (h1 > 0.55) {
-      const px1 = ox + 2 + (h2 * 12) | 0;
-      const py1 = oy + 3 + (h3 * 10) | 0;
-      px(g, px1, py1, h4 > 0.5 ? DECO.pebbleLight : DECO.pebbleDark, 2, 1);
-    }
-    if (h3 > 0.85) {
-      const px2 = ox + 6 + (h4 * 6) | 0;
-      const py2 = oy + 7 + (h1 * 4) | 0;
-      px(g, px2, py2, DECO.pebbleDark, 1, 1);
-    }
-    return;
-  }
-
-  // ── Shore ────────────────────────────────────────────────────────────────
-  if (isShoreType(tileType)) {
-    if (h1 > 0.4) {
-      const fy = oy + 1;
-      const fx = ox + (h2 * 8) | 0;
-      const fLen = 3 + (h3 * 5) | 0;
-      px(g, fx, fy, DECO.shoreFoam, fLen, 1);
-    }
-    if (h4 > 0.6) {
-      px(g, ox + 2, oy + 13, DECO.shoreWet, 4, 1);
-    }
-    return;
-  }
-
-  // ── Water (static wave lines — shimmer is animated separately) ───────────
-  if (isWaterType(tileType)) {
-    if (h1 > 0.65) {
-      const wx2 = ox + 1 + (h2 * 10) | 0;
-      const wy2 = oy + 4 + (h3 * 8) | 0;
-      px(g, wx2, wy2, h4 > 0.5 ? DECO.waveLight : DECO.waveDark, 3, 1);
-    }
-    return;
-  }
-}
-
-// ── Chunk Render State ──────────────────────────────────────────────────────
+// ── Chunk Render State ──────────────────────────────────────────────────────────────────
 
 interface ChunkRenderState {
   base: Container;
-  deco: Graphics;
   water: Container;
   animatedTiles: AnimatedTile[];
   decoSprites: Sprite[];
@@ -394,7 +122,6 @@ export class TileRenderer {
 
     const chunkPx = CHUNK_SIZE * TILE_PX;
     const base = new Container();
-    const deco = new Graphics();
     const water = new Container();
 
     const animatedTiles = findAnimatedTiles(chunk.tiles);
@@ -453,11 +180,10 @@ export class TileRenderer {
     base.addChild(baseG);
 
     // ── Layer 2: unified decorations ──────────────────────────────────────
-    // Collect both procedural details (flat Graphics) and atlas sprites
-    // that need Y-sorting for correct overlap.
+    // Collect atlas sprites that need Y-sorting for correct overlap.
     // Pass 1: two-tile trees (canopy + trunk pairs for forest terrain)
     // Pass 2: one-tile trees (27/28 for forest terrain)
-    // Pass 3: all other decorations (non-tree atlas + procedural)
+    // Pass 3: all other non-tree atlas decorations
     const decoSprites: Sprite[] = [];
     /** Set of (ly * CHUNK_SIZE + lx) keys for cells already consumed by a tree canopy */
     const consumedCanopy = new Set<number>();
@@ -519,25 +245,19 @@ export class TileRenderer {
       }
     }
 
-    // ── Pass 3: non-tree decorations ─────────────────────────────────────
+    // ── Pass 3: non-tree atlas decorations ───────────────────────────────
+    // Forest tiles are skipped: trees were placed in Passes 1–2 via
+    // selectTwoTileTree/selectOneTileTree (the atlas tree system).
     for (let ly = 0; ly < CHUNK_SIZE; ly++) {
       for (let lx = 0; lx < CHUNK_SIZE; lx++) {
         const tileType = chunk.tiles[ly]?.[lx];
         if (tileType === undefined) continue;
         if (animatedSet.has(ly * CHUNK_SIZE + lx)) continue;
+        if (isForestType(tileType)) continue;
 
         const wx = chunk.cx * CHUNK_SIZE + lx;
         const wy = chunk.cy * CHUNK_SIZE + ly;
 
-        // For forest tiles, only draw procedural fallback if no atlas tree was placed
-        if (isForestType(tileType)) {
-          if (treePlaced.has(ly * CHUNK_SIZE + lx)) continue;
-          // Procedural forest fallback
-          drawDecorations(deco, tileType, lx, ly, wx, wy);
-          continue;
-        }
-
-        // Try atlas decoration first
         const atlasDeco = selectDecorationWithOffset(
           tileType, wx, wy, VARIATION_SEED, atlasCount,
         );
@@ -549,17 +269,10 @@ export class TileRenderer {
             sprite.x = lx * TILE_PX + atlasDeco.xOffset;
             sprite.y = ly * TILE_PX + atlasDeco.yOffset;
             decoSprites.push(sprite);
-            continue;
           }
-          // Atlas texture not loaded — fall through to procedural
         }
-
-        // Procedural fallback: draw small details to flat Graphics
-        drawDecorations(deco, tileType, lx, ly, wx, wy);
       }
     }
-
-    base.addChild(deco);
 
     // Sort atlas decoration sprites by world Y (bottom edge), then X for stability
     decoSprites.sort((a, b) => {
@@ -639,7 +352,7 @@ export class TileRenderer {
     this.stage.addChild(base);
     this.stage.addChild(water);
 
-    this.chunks.set(key, { base, deco, water, animatedTiles, decoSprites, waterSprites });
+    this.chunks.set(key, { base, water, animatedTiles, decoSprites, waterSprites });
   }
 
   removeChunk(cx: number, cy: number): void {

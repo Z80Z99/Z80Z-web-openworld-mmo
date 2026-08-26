@@ -150,8 +150,8 @@ export const TERRAIN_DECORATIONS: Record<TerrainCategory, readonly number[]> = {
   ice: [],
   shore: [],
   water: [],
-  // GravelPath: no atlas decorations on walking paths — pebbles are procedural
-  // only (drawn in TileRenderer drawDecorations). Trees/large decor suppressed.
+  // GravelPath: no atlas decorations on walking paths; trees/large
+  // decor suppressed to keep paths clear.
   gravel: [],
 };
 
