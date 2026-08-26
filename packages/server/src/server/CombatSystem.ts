@@ -273,6 +273,7 @@ export class CombatSystem {
     sessionId: string,
     mob: MobInstance,
     now: number,
+    playerLevel: number = 1,
   ): CombatEvent[] | null {
     // Check cooldown
     const lastAttack = this.playerAttackCooldowns.get(sessionId) ?? 0;
@@ -292,8 +293,8 @@ export class CombatSystem {
 
     const events: CombatEvent[] = [];
 
-    // Calculate damage
-    const damage = calculateDamage(playerStats.attack, 1, mob.config.baseDefense);
+    // Calculate damage (real player level drives the multiplier)
+    const damage = calculateDamage(playerStats.attack, playerLevel, mob.config.baseDefense);
 
     // Apply damage to mob
     mob.currentHp = Math.max(0, mob.currentHp - damage);
@@ -355,6 +356,11 @@ export class CombatSystem {
     playerHp: number,
     now: number,
   ): CombatEvent[] | null {
+    // Dead players cannot be attacked (and no cooldown is consumed).
+    if (playerHp <= 0) {
+      return null;
+    }
+
     // Check attack cooldown
     if (now - mob.lastAttackTime < CombatSystem.ATTACK_COOLDOWN_MS) {
       return null;

@@ -187,6 +187,35 @@ export class GameLoop {
         if (client) {
           client.send("combat_event", event);
         }
+
+        // Respawn after a short death delay: full HP at the world origin,
+        // and every mob loses interest in the respawned player.
+        setTimeout(() => {
+          const respawning = this.room.state.players.get(event.targetId);
+          if (!respawning) return;
+
+          respawning.health = respawning.maxHealth;
+          respawning.x = 0;
+          respawning.y = 0;
+          respawning.chunkX = 0;
+          respawning.chunkY = 0;
+
+          for (const [, mob] of this.mobSpawner.getAllMobs()) {
+            if (mob.aggroTarget === event.targetId) {
+              mob.aggroTarget = null;
+              mob.aiState = "patrol";
+            }
+          }
+
+          const respawnClient = this.room.clients.getById(event.targetId);
+          respawnClient?.send("combat_event", {
+            type: "player_respawn",
+            sourceId: event.targetId,
+            targetId: event.targetId,
+            currentHp: respawning.health,
+            maxHp: respawning.maxHealth,
+          });
+        }, 3000);
         break;
       }
       case "mob_killed": {

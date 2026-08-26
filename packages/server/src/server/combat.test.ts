@@ -648,8 +648,8 @@ describe("MobSpawner", () => {
       spawner.tick(0.05, players, Date.now());
       expect(mob.aggroTarget).toBe("p1");
 
-      // Move player out of leash range (10 tiles)
-      players.set("p1", { x: mob.x + 15, y: mob.y, health: 100 });
+      // Move player out of leash range (LEASH_RANGE = 30 tiles)
+      players.set("p1", { x: mob.x + 35, y: mob.y, health: 100 });
       spawner.tick(0.05, players, Date.now());
 
       // Mob should leash back to patrol
@@ -676,5 +676,69 @@ describe("MobSpawner", () => {
     it("returns undefined for unknown ID", () => {
       expect(spawner.getMob("mob_999")).toBeUndefined();
     });
+  });
+});
+
+/* ���� Combat Activation Slice ���� */
+
+describe("processMobAttack - dead player guard", () => {
+  it("returns null and skips cooldown when player is already dead", () => {
+    const combat = new CombatSystem();
+    // Build a minimal mob instance directly
+    const wolf = MOB_TYPES["wolf"];
+    const testMob: MobInstance = {
+      id: "mob_test_1",
+      typeId: "wolf",
+      config: wolf,
+      x: 0, y: 0,
+      currentHp: wolf.baseHp,
+      maxHp: wolf.baseHp,
+      aggroTarget: "p1",
+      aiState: "chase",
+      patrolTarget: null,
+      spawnX: 0, spawnY: 0,
+      chunkX: 0, chunkY: 0,
+      deathTime: 0,
+      lastAttackTime: 0,
+      lastCombatTime: 0,
+      synced: false,
+    };
+    const now = Date.now();
+    // Dead player (hp = 0): attack must be ignored entirely.
+    expect(combat.processMobAttack(testMob, "p1", 0, now)).toBeNull();
+    // Cooldown must NOT be consumed (mob can attack a living target right after).
+    const events = combat.processMobAttack(testMob, "p1", 50, now);
+    expect(events).not.toBeNull();
+  });
+});
+
+describe("processPlayerAttack - player level scaling", () => {
+  it("uses the passed player level instead of hardcoded 1", () => {
+    const combat = new CombatSystem();
+    const slime = MOB_TYPES["slime"];
+    const testMob: MobInstance = {
+      id: "mob_test_2",
+      typeId: "slime",
+      config: slime,
+      x: 0, y: 0,
+      currentHp: 9999,
+      maxHp: 9999,
+      aggroTarget: null,
+      aiState: "idle",
+      patrolTarget: null,
+      spawnX: 0, spawnY: 0,
+      chunkX: 0, chunkY: 0,
+      deathTime: 0,
+      lastAttackTime: 0,
+      lastCombatTime: 0,
+      synced: false,
+    };
+    const now = Date.now();
+    // attack=10, defense=1: level 1 -> round(10*1.1)-1 = 10; level 10 -> round(10*2.0)-1 = 19
+    const e1 = combat.processPlayerAttack("p1", testMob, now, 1)!;
+    expect(e1[0].damage).toBe(calculateDamage(10, 1, slime.baseDefense));
+    const e10 = combat.processPlayerAttack("p1", testMob, now + 2000, 10)!;
+    expect(e10[0].damage).toBe(calculateDamage(10, 10, slime.baseDefense));
+    expect(e10[0].damage!).toBeGreaterThan(e1[0].damage!);
   });
 });

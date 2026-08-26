@@ -24,7 +24,7 @@ import type Database from "better-sqlite3";
 import { Auth } from "./Auth.js";
 import { AOIManager } from "./AOI.js";
 import { GameLoop, createGameLoop } from "./GameLoop.js";
-import { CombatSystem } from "./CombatSystem.js";
+import { CombatSystem, hasLeveledUp } from "./CombatSystem.js";
 import { MobSpawner } from "./MobSpawner.js";
 import { QuestSystem } from "./QuestSystem.js";
 import { MovementSystem } from "./MovementSystem.js";
@@ -666,13 +666,27 @@ export class GameRoom extends Room<RoomState> {
       const mob = this.mobSpawner.getMob(message.targetId);
       if (!mob || mob.aiState === "dead") return;
 
+      // Server-authoritative melee range check (silent ignore on miss).
+      const PLAYER_ATTACK_RANGE = 2.5;
+      const dist = Math.hypot(player.x - mob.x, player.y - mob.y);
+      if (dist > PLAYER_ATTACK_RANGE) return;
+
       const events = this.combatSystem.processPlayerAttack(
         client.sessionId,
         mob,
         Date.now(),
+        player.level,
       );
 
       if (!events) return;
+
+      // Aggro-on-hit: the attacked mob turns on its attacker (unless the
+      // strike killed it — processPlayerAttack then clears aggro itself).
+      if (mob.currentHp > 0) {
+        mob.aggroTarget = client.sessionId;
+        mob.aiState = "chase";
+        mob.lastCombatTime = Date.now();
+      }
 
       // Apply combat events
       for (const event of events) {
@@ -715,6 +729,46 @@ export class GameRoom extends Room<RoomState> {
             targetClient.send("combat_event", event);
           }
         }
+
+        if (event.type === "loot_dropped" && event.loot?.length) {
+          // Persist combat loot straight into the player's inventory.
+          const authData = (client as any).authData as ClientAuthData | undefined;
+          if (authData?.playerId) {
+            const inventory = this.getPlayerInventory(authData.playerId);
+            for (const itemId of event.loot) {
+              inventory.set(itemId, (inventory.get(itemId) ?? 0) + 1);
+            }
+            this.savePlayerInventory(authData.playerId, inventory);
+          }
+        }
+      }
+
+      // Sync XP to schema and apply any level-ups from this kill.
+      const stats = this.combatSystem.getPlayerStats(client.sessionId);
+      if (stats) {
+        while (hasLeveledUp(stats.xp, stats.xpToNextLevel)) {
+          stats.xp -= stats.xpToNextLevel;
+          player.level += 1;
+          stats.attack += 2;
+          stats.defense += 1;
+          stats.xpToNextLevel = 100 * player.level;
+          player.maxHealth += 20;
+          player.health = player.maxHealth;
+
+          const lvlClient = this.clients.getById(client.sessionId);
+          lvlClient?.send("combat_event", {
+            type: "level_up",
+            sourceId: client.sessionId,
+            targetId: client.sessionId,
+            level: player.level,
+            attack: stats.attack,
+            defense: stats.defense,
+            currentHp: player.health,
+            maxHp: player.maxHealth,
+          });
+        }
+        player.xp = stats.xp;
+        player.xpToNextLevel = stats.xpToNextLevel;
       }
     });
 
