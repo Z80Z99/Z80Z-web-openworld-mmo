@@ -212,7 +212,7 @@ export class TextureManager {
     return this.shoreTextures.length;
   }
 
-  /** Get a ground-edge texture by 1-based index (1–8). Returns null if out of range. */
+  /** Get a ground-edge texture by 1-based index (1–12). Returns null if out of range. */
   getGroundEdgeTexture(index: number): Texture | null {
     if (index < 1 || index > this.groundEdgeTextures.length) return null;
     return this.groundEdgeTextures[index - 1] ?? null;

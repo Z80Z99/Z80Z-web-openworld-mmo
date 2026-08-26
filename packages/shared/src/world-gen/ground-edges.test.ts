@@ -113,24 +113,30 @@ describe("getGroundEdgeTiles", () => {
     expect(getGroundEdgeTiles(Direction.S | Direction.E)).toEqual([{ index: 8 }]);
   });
 
-  // ── Quadrant wins over extra cardinal edge ──
+  // ── Multi-cardinal combinations (deterministic overlay decomposition) ──
 
-  it("returns [{index:3}] for N|E|S — quadrant beats extra edge", () => {
-    expect(getGroundEdgeTiles(Direction.N | Direction.E | Direction.S)).toEqual([{ index: 3 }]);
+  it("returns [{index:3},{index:7}] for N|E|S — L-tile plus remaining straight", () => {
+    expect(getGroundEdgeTiles(Direction.N | Direction.E | Direction.S)).toEqual([
+      { index: 3 },
+      { index: 7 },
+    ]);
   });
 
-  it("returns [{index:1}] for N|E|S|W — first quadrant check wins", () => {
-    expect(getGroundEdgeTiles(Direction.N | Direction.E | Direction.S | Direction.W)).toEqual([{ index: 1 }]);
+  it("returns [{index:1},{index:8}] for N|E|S|W — two disjoint L-tiles", () => {
+    expect(getGroundEdgeTiles(Direction.N | Direction.E | Direction.S | Direction.W)).toEqual([
+      { index: 1 },
+      { index: 8 },
+    ]);
   });
 
-  // ── Opposite edges → single-edge priority N > E > S > W ──
+  // ── Opposite edges → both straights, emission order N, E, S, W ──
 
-  it("returns [{index:2}] for N|S — N has priority", () => {
-    expect(getGroundEdgeTiles(Direction.N | Direction.S)).toEqual([{ index: 2 }]);
+  it("returns [{index:2},{index:7}] for N|S — both opposite straights", () => {
+    expect(getGroundEdgeTiles(Direction.N | Direction.S)).toEqual([{ index: 2 }, { index: 7 }]);
   });
 
-  it("returns [{index:5}] for E|W — E has priority", () => {
-    expect(getGroundEdgeTiles(Direction.E | Direction.W)).toEqual([{ index: 5 }]);
+  it("returns [{index:5},{index:4}] for E|W — both opposite straights", () => {
+    expect(getGroundEdgeTiles(Direction.E | Direction.W)).toEqual([{ index: 5 }, { index: 4 }]);
   });
 
   // ── Cardinal bits take priority over diagonals ──
@@ -139,10 +145,54 @@ describe("getGroundEdgeTiles", () => {
     expect(getGroundEdgeTiles(Direction.N | Direction.NW)).toEqual([{ index: 2 }]);
   });
 
-  it("returns [{index:1}] for N|W|SE|SW — quadrant beats diagonals", () => {
+  it("returns [{index:1},{index:11}] for N|W|SE|SW — L-tile plus eligible SE corner, SW suppressed by W", () => {
     expect(
       getGroundEdgeTiles(Direction.N | Direction.W | Direction.SE | Direction.SW),
-    ).toEqual([{ index: 1 }]);
+    ).toEqual([{ index: 1 }, { index: 11 }]);
+  });
+
+  // ── Remaining L+straight and cardinal+diagonal combinations ──
+
+  it("returns [{index:1},{index:7}] for N|W|S — L-tile plus remaining straight", () => {
+    expect(getGroundEdgeTiles(Direction.N | Direction.W | Direction.S)).toEqual([
+      { index: 1 },
+      { index: 7 },
+    ]);
+  });
+
+  it("returns [{index:1},{index:5}] for N|W|E", () => {
+    expect(getGroundEdgeTiles(Direction.N | Direction.W | Direction.E)).toEqual([
+      { index: 1 },
+      { index: 5 },
+    ]);
+  });
+
+  it("returns [{index:6},{index:5}] for E|S|W — S+W L-tile consumes pair, E straight last", () => {
+    expect(getGroundEdgeTiles(Direction.E | Direction.S | Direction.W)).toEqual([
+      { index: 6 },
+      { index: 5 },
+    ]);
+  });
+
+  it("returns [{index:2},{index:11}] for N|SE — cardinal straight plus eligible opposite corner", () => {
+    expect(getGroundEdgeTiles(Direction.N | Direction.SE)).toEqual([
+      { index: 2 },
+      { index: 11 },
+    ]);
+  });
+
+  it("returns [{index:2},{index:12}] for N|SW — SW corner eligible (flank S,W absent)", () => {
+    expect(getGroundEdgeTiles(Direction.N | Direction.SW)).toEqual([
+      { index: 2 },
+      { index: 12 },
+    ]);
+  });
+
+  it("returns [{index:5},{index:9}] for E|NW — NW corner eligible, straights precede corners", () => {
+    expect(getGroundEdgeTiles(Direction.E | Direction.NW)).toEqual([
+      { index: 5 },
+      { index: 9 },
+    ]);
   });
 
   // ── Exhaustive invariants for every mask 0..255 ──
@@ -156,12 +206,44 @@ describe("getGroundEdgeTiles", () => {
     }
   });
 
-  it("returns ≥2 tiles only via diagonal-only masks", () => {
-    const CARDINALS = Direction.N | Direction.E | Direction.S | Direction.W;
+  it("coverage: every set cardinal is covered by at least one emitted tile (all 256 masks)", () => {
+    const COVERED: Record<number, Array<"N" | "E" | "S" | "W">> = {
+      1: ["N", "W"],
+      2: ["N"],
+      3: ["N", "E"],
+      4: ["W"],
+      5: ["E"],
+      6: ["S", "W"],
+      7: ["S"],
+      8: ["S", "E"],
+      9: [],
+      10: [],
+      11: [],
+      12: [],
+    };
+    const C = { N: Direction.N, E: Direction.E, S: Direction.S, W: Direction.W };
     for (let mask = 0; mask <= 255; mask++) {
       const result = getGroundEdgeTiles(mask);
-      if (result.length >= 2) {
-        expect(mask & CARDINALS).toBe(0);
+      const covered = new Set(result.flatMap((t) => COVERED[t.index] ?? []));
+      for (const name of ["N", "E", "S", "W"] as const) {
+        if (mask & C[name]) expect(covered.has(name)).toBe(true);
+      }
+    }
+  });
+
+  it("corner rule: corner tile present iff its diagonal is set and BOTH flanking cardinals absent (all 256 masks)", () => {
+    const RULES = [
+      { diag: Direction.NW, a: Direction.N, b: Direction.W, index: 9 },
+      { diag: Direction.NE, a: Direction.N, b: Direction.E, index: 10 },
+      { diag: Direction.SW, a: Direction.S, b: Direction.W, index: 12 },
+      { diag: Direction.SE, a: Direction.S, b: Direction.E, index: 11 },
+    ] as const;
+    for (let mask = 0; mask <= 255; mask++) {
+      const indices = new Set(getGroundEdgeTiles(mask).map((t) => t.index));
+      for (const r of RULES) {
+        const should =
+          (mask & r.diag) !== 0 && (mask & r.a) === 0 && (mask & r.b) === 0;
+        expect(indices.has(r.index)).toBe(should);
       }
     }
   });

@@ -207,7 +207,7 @@ export function computeNeighborMask(
 /**
  * A single ground-edge overlay tile.
  *
- * `index` maps to `edge-grass-dirt{index}.png` (1–8).
+ * `index` maps to `edge-grass-dirt{index}.png` (1–12).
  */
 export interface GroundEdgeTile {
   readonly index: number;
@@ -247,18 +247,65 @@ export function isSandFamilyTile(t: TileType): boolean {
 }
 
 /**
+ * Cardinal-bit subset mask used by ground-edge decomposition.
+ */
+const GROUND_EDGE_CARDINALS =
+  Direction.N | Direction.E | Direction.S | Direction.W;
+
+/**
+ * Adjacent-cardinal pair → L-shaped overlay tile, in greedy slot order.
+ * Each L-tile (edge-grass-dirt 1/3/6/8) paints both edges of its quadrant.
+ */
+const GROUND_EDGE_PAIR_SLOTS = [
+  { a: Direction.N, b: Direction.W, index: 1 }, // NW quadrant L
+  { a: Direction.N, b: Direction.E, index: 3 }, // NE quadrant L
+  { a: Direction.S, b: Direction.W, index: 6 }, // SW quadrant L
+  { a: Direction.S, b: Direction.E, index: 8 }, // SE quadrant L
+] as const;
+
+/**
+ * Lone cardinal → straight band overlay, fixed emission order N,E,S,W.
+ */
+const GROUND_EDGE_STRAIGHTS = [
+  { bit: Direction.N, index: 2 },
+  { bit: Direction.E, index: 5 },
+  { bit: Direction.S, index: 7 },
+  { bit: Direction.W, index: 4 },
+] as const;
+
+/**
+ * Diagonal → outer-corner overlay with its two flanking cardinals; the
+ * corner is emitted only when both flanks are absent from the mask.
+ */
+const GROUND_EDGE_CORNER_RULES = [
+  { diag: Direction.NW, a: Direction.N, b: Direction.W, index: 9 },
+  { diag: Direction.NE, a: Direction.N, b: Direction.E, index: 10 },
+  { diag: Direction.SW, a: Direction.S, b: Direction.W, index: 12 },
+  { diag: Direction.SE, a: Direction.S, b: Direction.E, index: 11 },
+] as const;
+
+/**
  * Deterministic ground-edge overlay selection for a sand-family tile
  * whose 8-neighbor bitmask encodes which neighbours are grass-family.
  *
  * Each set bit means "that neighbour is grass-family"; the tile hosting
  * the overlay is sand-family.
  *
- * Returns 0–4 `GroundEdgeTile`s. Cardinal bits take priority: quadrant
- * pairs (two adjacent cardinals) beat single edges, checked in fixed order
- * N&W, N&E, S&W, S&E; single edges resolve by priority N > E > S > W.
- * Diagonal-only masks (no cardinal bits) return corner overlays from
- * edge-grass-dirt9..12 — one per set diagonal (corners paint disjoint
- * quadrants, so they stack), ordered by ascending bit value NW→NE→SW→SE.
+ * The mask decomposes into ordered overlays in three fixed stages:
+ *
+ * 1. Adjacent-cardinal pairs take their dedicated L-shaped tile
+ *    (edge-grass-dirt 1/3/6/8 paint BOTH edges fully), greedily in the
+ *    slot order N&W, N&E, S&W, S&E. A cardinal consumed by a slot is
+ *    never reused, so four-way masks yield two disjoint L-tiles ([1,8])
+ *    instead of collapsing to one.
+ * 2. Remaining lone cardinals get straight band overlays (2/5/7/4) in
+ *    the fixed emission order N, E, S, W — opposite pairs like N|S now
+ *    stack both bands instead of dropping one.
+ * 3. Each set diagonal gets its outer-corner overlay (9/10/12/11,
+ *    ascending bit order NW,NE,SW,SE) unless a flanking cardinal is set,
+ *    whose band already paints that corner region.
+ *
+ * Pure and total: the same mask always yields the same sequence.
  *
  * @param mask Bitmask where each bit represents a grass-family neighbour
  * @returns Array of 0–4 GroundEdgeTiles
@@ -266,32 +313,37 @@ export function isSandFamilyTile(t: TileType): boolean {
 export function getGroundEdgeTiles(mask: number): GroundEdgeTile[] {
   if (mask === 0) return [];
 
-  const edges = mask & (Direction.N | Direction.E | Direction.S | Direction.W);
+  const result: GroundEdgeTile[] = [];
 
-  if (edges === 0) {
-    // Diagonal-only → corner overlays (edge-grass-dirt9..12). Corners paint
-    // disjoint quadrants, so every set diagonal gets its tile; order is fixed
-    // by ascending bit value for determinism: NW(1)→9, NE(4)→10, SW(32)→12,
-    // SE(128)→11.
-    const corners: GroundEdgeTile[] = [];
-    if (mask & Direction.NW) corners.push({ index: 9 });
-    if (mask & Direction.NE) corners.push({ index: 10 });
-    if (mask & Direction.SW) corners.push({ index: 12 });
-    if (mask & Direction.SE) corners.push({ index: 11 });
-    return corners;
+  // ── 1. Adjacent-cardinal pairs → L-shaped overlay tiles ───────────
+
+  let remaining = mask & GROUND_EDGE_CARDINALS;
+  for (const { a, b, index } of GROUND_EDGE_PAIR_SLOTS) {
+    if ((remaining & a) !== 0 && (remaining & b) !== 0) {
+      result.push({ index });
+      remaining &= ~(a | b);
+    }
   }
 
-  // Quadrant pairs first, fixed check order: N&W, N&E, S&W, S&E
-  if ((mask & Direction.N) && (mask & Direction.W)) return [{ index: 1 }];
-  if ((mask & Direction.N) && (mask & Direction.E)) return [{ index: 3 }];
-  if ((mask & Direction.S) && (mask & Direction.W)) return [{ index: 6 }];
-  if ((mask & Direction.S) && (mask & Direction.E)) return [{ index: 8 }];
+  // ── 2. Remaining lone cardinals → straight band overlays ──────────
 
-  // Single edge by priority: N > E > S > W
-  if (mask & Direction.N) return [{ index: 2 }];
-  if (mask & Direction.E) return [{ index: 5 }];
-  if (mask & Direction.S) return [{ index: 7 }];
-  if (mask & Direction.W) return [{ index: 4 }];
+  for (const { bit, index } of GROUND_EDGE_STRAIGHTS) {
+    if ((remaining & bit) !== 0) {
+      result.push({ index });
+      remaining &= ~bit;
+    }
+  }
 
-  return [];
+  // ── 3. Diagonal contacts → outer-corner overlays ──────────────────
+  // A diagonal neighbour touches the tile only at one corner point; its
+  // rounding tile is skipped when a flanking cardinal's band already
+  // paints that corner region.
+
+  for (const { diag, a, b, index } of GROUND_EDGE_CORNER_RULES) {
+    if ((mask & diag) !== 0 && (mask & a) === 0 && (mask & b) === 0) {
+      result.push({ index });
+    }
+  }
+
+  return result;
 }
