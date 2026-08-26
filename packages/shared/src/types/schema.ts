@@ -11,6 +11,8 @@ export class PlayerState extends Schema {
   @type("float32") speed: number = 4;
   @type("string") name: string = "";
   @type("int32") level: number = 1;
+  @type("int32") xp: number = 0;
+  @type("int32") xpToNextLevel: number = 100;
   @type("string") title: string = "";
   @type("string") mountId: string = "";
 }

@@ -17,6 +17,8 @@ export type {
   AuthLogin,
   CraftRequest,
   MountAction,
+  AttackMessage,
+  CombatEventPayload,
   ClientMessage,
 } from "./types/messages.js";
 

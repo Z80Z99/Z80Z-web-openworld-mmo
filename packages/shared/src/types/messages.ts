@@ -44,6 +44,32 @@ export interface MountAction {
   action: "mount" | "dismount";
 }
 
+/** Player attacks a mob */
+export interface AttackMessage {
+  type: "attack";
+  targetId: string;
+}
+
+/**
+ * Unified server→client combat event payload.
+ * `type` is one of: damage_dealt | mob_killed | player_damaged | player_died |
+ * xp_gained | loot_dropped | player_respawn | level_up | mob_respawn
+ */
+export interface CombatEventPayload {
+  type: string;
+  sourceId: string;
+  targetId: string;
+  damage?: number;
+  xp?: number;
+  loot?: string[];
+  currentHp?: number;
+  maxHp?: number;
+  mobType?: string;
+  level?: number;
+  attack?: number;
+  defense?: number;
+}
+
 /** Union of all client-to-server message types */
 export type ClientMessage =
   | ChatMessage
@@ -52,4 +78,5 @@ export type ClientMessage =
   | AuthRegister
   | AuthLogin
   | CraftRequest
-  | MountAction;
+  | MountAction
+  | AttackMessage;
