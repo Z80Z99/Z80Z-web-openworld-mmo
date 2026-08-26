@@ -358,8 +358,10 @@ async function main() {
         const key = `${chunkCx},${chunkCy}`;
         if (loadedChunks.has(key)) continue;
 
-        // Client-side prediction: generate chunk locally
+        // Client-side prediction: generate chunk locally. On generation
+        // failure skip WITHOUT marking loaded, so a later frame retries.
         const chunk = gameState.predictChunk(chunkCx, chunkCy);
+        if (!chunk) continue;
         tileRenderer.renderChunk(chunk);
         loadedChunks.add(key);
       }

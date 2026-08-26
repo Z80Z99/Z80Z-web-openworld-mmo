@@ -175,7 +175,9 @@ describe("GameState", () => {
     const state2 = new GameState(42);
     const c1 = state1.predictChunk(0, 0);
     const c2 = state2.predictChunk(0, 0);
-    expect(c1.tiles).toEqual(c2.tiles);
+    expect(c1).not.toBeNull();
+    expect(c2).not.toBeNull();
+    expect(c1?.tiles).toEqual(c2?.tiles);
   });
 });
 

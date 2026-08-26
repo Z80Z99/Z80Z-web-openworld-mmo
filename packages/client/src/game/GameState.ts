@@ -149,6 +149,8 @@ export class GameState {
   /**
    * Validate that a world position is on walkable terrain.
    * Mirrors server's MovementSystem.validateTerrain().
+   *
+   * Fail-closed: if chunk generation fails, the tile is treated as blocked.
    */
   validateTerrain(x: number, y: number): boolean {
     const tileX = Math.floor(x);
@@ -157,9 +159,10 @@ export class GameState {
     const chunkY = Math.floor(tileY / CHUNK_SIZE);
     const localX = ((tileX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
     const localY = ((tileY % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const chunk = this.worldGen.generateChunk(chunkX, chunkY);
-    const tile = chunk.tiles[localY][localX];
-    return !BLOCKED_TILES.has(tile);
+    const chunk = this.getOrGenerateChunk(chunkX, chunkY);
+    if (!chunk) return false;
+    const tile = chunk.tiles[localY]?.[localX];
+    return tile !== undefined && !BLOCKED_TILES.has(tile);
   }
 
   /* ── Remote players ── */
@@ -262,9 +265,35 @@ export class GameState {
     return this.serverChunks.has(`${cx},${cy}`);
   }
 
-  /** Client-side predicted chunk (same seed as server). */
-  predictChunk(cx: number, cy: number) {
-    return this.worldGen.generateChunk(cx, cy);
+  /**
+   * Client-side predicted chunk (same seed as server).
+   * Shares the unified chunk cache with getTileAt()/validateTerrain().
+   */
+  predictChunk(cx: number, cy: number): Chunk | null {
+    return this.getOrGenerateChunk(cx, cy);
+  }
+
+  /**
+   * Single shared chunk generation path. Every world coordinate resolves to
+   * ONE generated Chunk instance regardless of who asks: movement prediction,
+   * collision checks and renderer neighbour queries all reuse the same entry,
+   * so generateChunk()'s full noise re-sample (~10k calls) runs at most once
+   * per chunk per session.
+   *
+   * Returns null only when generation throws.
+   */
+  private getOrGenerateChunk(cx: number, cy: number): Chunk | null {
+    const key = `${cx},${cy}`;
+    let chunk = this.tileQueryCache.get(key);
+    if (!chunk) {
+      try {
+        chunk = this.worldGen.generateChunk(cx, cy);
+      } catch {
+        return null;
+      }
+      this.tileQueryCache.set(key, chunk);
+    }
+    return chunk;
   }
 
   /**
@@ -283,16 +312,8 @@ export class GameState {
     const chunkY = Math.floor(tileY / CHUNK_SIZE);
     const localX = ((tileX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
     const localY = ((tileY % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const key = `${chunkX},${chunkY}`;
-    let chunk = this.tileQueryCache.get(key);
-    if (!chunk) {
-      try {
-        chunk = this.worldGen.generateChunk(chunkX, chunkY);
-      } catch {
-        return null;
-      }
-      this.tileQueryCache.set(key, chunk);
-    }
+    const chunk = this.getOrGenerateChunk(chunkX, chunkY);
+    if (!chunk) return null;
     return chunk.tiles[localY]?.[localX] ?? null;
   }
 
