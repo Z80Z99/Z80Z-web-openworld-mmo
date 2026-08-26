@@ -50,6 +50,12 @@ export interface AttackMessage {
   targetId: string;
 }
 
+/** Player performs an encounter action (turn-based combat) */
+export interface EncounterActionMessage {
+  type: "encounter_action";
+  action: "attack" | "defend" | "flee";
+}
+
 /**
  * Unified server→client combat event payload.
  * `type` is one of: damage_dealt | mob_killed | player_damaged | player_died |
@@ -79,4 +85,5 @@ export type ClientMessage =
   | AuthLogin
   | CraftRequest
   | MountAction
-  | AttackMessage;
+  | AttackMessage
+  | EncounterActionMessage;

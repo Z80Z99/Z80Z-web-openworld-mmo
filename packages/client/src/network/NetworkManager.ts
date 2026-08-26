@@ -109,6 +109,11 @@ export class NetworkManager {
     this.room?.send("attack", { targetId });
   }
 
+  /** Send a turn-based encounter action (attack / defend / flee) to the server. */
+  sendEncounterAction(action: "attack" | "defend" | "flee"): void {
+    this.room?.send("encounter_action", { type: "encounter_action", action });
+  }
+
   /** Send a mount action to the server. */
   sendMountAction(action: "mount" | "dismount", mountId: string): void {
     this.room?.send("mount_action", { type: "mount_action", action, mountId });

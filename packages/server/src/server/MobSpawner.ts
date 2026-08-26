@@ -141,6 +141,11 @@ export class MobSpawner {
         continue;
       }
 
+      // Skip AI for mobs locked in a turn-based encounter
+      if (mob.aiState === "fighting" || mob.inEncounter) {
+        continue;
+      }
+
       // Find nearest player for aggro check
       const nearest = this.findNearestPlayer(mob, players);
 
@@ -223,6 +228,8 @@ export class MobSpawner {
         maxHp: config.baseHp,
         aggroTarget: null,
         aiState: "idle",
+        inEncounter: false,
+        pendingEncounterTarget: null,
         patrolTarget: null,
         spawnX: wx,
         spawnY: wy,
@@ -276,17 +283,8 @@ export class MobSpawner {
       // Check attack range
       const dist = this.distance(mob.x, mob.y, targetX, targetY);
       if (dist <= MOB_ATTACK_RANGE) {
-        // Attack the player
-        const attackEvents = this.combatSystem.processMobAttack(
-          mob,
-          mob.aggroTarget,
-          target.health,
-          now,
-        );
-        if (attackEvents) {
-          mob.lastCombatTime = now;
-          events.push(...attackEvents);
-        }
+        // Mark for encounter — GameLoop will begin the turn-based combat.
+        mob.pendingEncounterTarget = mob.aggroTarget;
         return;
       }
     } else if (mob.patrolTarget) {
@@ -319,6 +317,8 @@ export class MobSpawner {
     mob.currentHp = mob.maxHp;
     mob.aiState = "idle";
     mob.aggroTarget = null;
+    mob.inEncounter = false;
+    mob.pendingEncounterTarget = null;
     mob.patrolTarget = null;
     mob.deathTime = 0;
     mob.lastAttackTime = 0;

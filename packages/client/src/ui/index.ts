@@ -22,3 +22,5 @@ export { MobileUI } from "./MobileUI.js";
 export type { ChatToggleHandler } from "./MobileUI.js";
 export { IdleUI } from "./IdleUI.js";
 export type { IdleClaimHandler, IdleUIData } from "./IdleUI.js";
+export { EncounterPanel } from "./EncounterPanel.js";
+export type { EncounterShowPayload, EncounterUpdatePayload, EncounterAction, EncounterActionHandler } from "./EncounterPanel.js";

@@ -4,7 +4,8 @@ import type Database from "better-sqlite3";
 import { AOIManager } from "./AOI.js";
 import { MovementSystem } from "./MovementSystem.js";
 import type { MovementCommand } from "./MovementSystem.js";
-import { CombatSystem, type CombatEvent } from "./CombatSystem.js";
+import { CombatSystem } from "./CombatSystem.js";
+import { EncounterSystem, MOB_TURN_DELAY_MS } from "./EncounterSystem.js";
 import { MobSpawner } from "./MobSpawner.js";
 
 /**
@@ -21,6 +22,7 @@ export class GameLoop {
   private aoi: AOIManager;
   private movementSystem: MovementSystem;
   private combatSystem: CombatSystem;
+  private encounterSystem: EncounterSystem;
   private mobSpawner: MobSpawner;
   private lastTickTime: number = 0;
 
@@ -30,6 +32,7 @@ export class GameLoop {
     aoi: AOIManager,
     movementSystem: MovementSystem,
     combatSystem: CombatSystem,
+    encounterSystem: EncounterSystem,
     mobSpawner: MobSpawner,
   ) {
     this.room = room;
@@ -37,6 +40,7 @@ export class GameLoop {
     this.aoi = aoi;
     this.movementSystem = movementSystem;
     this.combatSystem = combatSystem;
+    this.encounterSystem = encounterSystem;
     this.mobSpawner = mobSpawner;
   }
 
@@ -60,6 +64,7 @@ export class GameLoop {
 
     this.processMovement(dt);
     this.tickMobAI(dt, now);
+    this.tickEncounters(now);
     this.syncMobEntities();
   };
 
@@ -155,78 +160,142 @@ export class GameLoop {
 
     const events = this.mobSpawner.tick(dt, players, now);
 
-    // Process combat events
-    for (const event of events) {
-      this.processCombatEvent(event);
+    // NOTE: MobSpawner no longer emits combat events directly.
+    // Mob-initiated combat now flows through pendingEncounterTarget → beginEncounter.
+
+    // Begin encounters for mobs that have a pending target
+    for (const [, mob] of this.mobSpawner.getAllMobs()) {
+      if (!mob.pendingEncounterTarget || mob.inEncounter) continue;
+
+      const targetSessionId = mob.pendingEncounterTarget;
+      const player = this.room.state.players.get(targetSessionId);
+      if (!player || player.health <= 0) {
+        mob.pendingEncounterTarget = null;
+        continue;
+      }
+
+      // Must be within encounter engage range
+      const dist = Math.hypot(player.x - mob.x, player.y - mob.y);
+      if (dist > 1.6) continue;
+
+      const pStats = this.combatSystem.getPlayerStats(targetSessionId);
+      const result = this.encounterSystem.beginEncounter(
+        targetSessionId,
+        mob.id,
+        "mob",
+        { mobHp: mob.currentHp, mobMaxHp: mob.maxHp, playerHp: player.health, playerMaxHp: player.maxHealth },
+        now,
+      );
+
+      if (result.encounter) {
+        mob.pendingEncounterTarget = null;
+        mob.inEncounter = true;
+        mob.aiState = "fighting";
+        mob.aggroTarget = null;
+
+        const client = this.room.clients.getById(targetSessionId);
+        if (client) {
+          client.send("combat_event", {
+            type: "encounter_started",
+            mobId: mob.id,
+            mobHp: mob.currentHp,
+            mobMaxHp: mob.maxHp,
+            playerHp: player.health,
+            playerMaxHp: player.maxHealth,
+            attack: pStats.attack,
+            defense: pStats.defense,
+            level: player.level,
+          });
+        }
+      }
     }
   }
 
   /**
-   * Process a single combat event — update state, notify clients.
+   * Tick turn-based encounters: resolve due mob turns and player-turn timeouts.
    */
-  private processCombatEvent(event: CombatEvent): void {
-    switch (event.type) {
-      case "player_damaged": {
-        const player = this.room.state.players.get(event.targetId);
-        if (player && event.currentHp !== undefined) {
-          player.health = event.currentHp;
-        }
-        // Notify the damaged player
-        const client = this.room.clients.getById(event.targetId);
-        if (client) {
-          client.send("combat_event", event);
-        }
-        break;
-      }
-      case "player_died": {
-        const player = this.room.state.players.get(event.targetId);
-        if (player) {
-          player.health = 0;
-        }
-        const client = this.room.clients.getById(event.targetId);
-        if (client) {
-          client.send("combat_event", event);
-        }
+  private tickEncounters(now: number): void {
+    // Resolve mob turns that are due
+    for (const enc of this.encounterSystem.getActiveEncounters()) {
+      if (enc.ended || enc.turn !== "mob" || !enc.mobTurnScheduledAt) continue;
+      if (now < enc.mobTurnScheduledAt) continue;
 
-        // Respawn after a short death delay: full HP at the world origin,
-        // and every mob loses interest in the respawned player.
-        setTimeout(() => {
-          const respawning = this.room.state.players.get(event.targetId);
-          if (!respawning) return;
+      const mob = this.mobSpawner.getMob(enc.mobId);
+      if (!mob) continue;
 
-          respawning.health = respawning.maxHealth;
-          respawning.x = 0;
-          respawning.y = 0;
-          respawning.chunkX = 0;
-          respawning.chunkY = 0;
+      const player = this.room.state.players.get(enc.playerId);
+      if (!player) continue;
 
-          for (const [, mob] of this.mobSpawner.getAllMobs()) {
-            if (mob.aggroTarget === event.targetId) {
-              mob.aggroTarget = null;
-              mob.aiState = "patrol";
-            }
-          }
+      const pStats = this.combatSystem.getPlayerStats(enc.playerId);
+      const result = this.encounterSystem.resolveMobTurn(
+        enc,
+        { mobAttack: mob.config.baseAttack, mobLevel: mob.config.level, playerDefense: pStats.defense },
+        Math.random,
+        now,
+      );
 
-          const respawnClient = this.room.clients.getById(event.targetId);
-          respawnClient?.send("combat_event", {
-            type: "player_respawn",
-            sourceId: event.targetId,
-            targetId: event.targetId,
-            currentHp: respawning.health,
-            maxHp: respawning.maxHealth,
+      if (result.error) continue;
+
+      // Apply encounter events to state
+      for (const evt of result.events) {
+        if (evt.type === "player_damaged" && typeof evt.damage === "number") {
+          player.health = Math.max(0, player.health - evt.damage);
+          const client = this.room.clients.getById(enc.playerId);
+          client?.send("combat_event", {
+            ...evt,
+            currentHp: player.health,
+            maxHp: player.maxHealth,
           });
-        }, 3000);
-        break;
-      }
-      case "mob_killed": {
-        const entity = this.room.state.entities.get(event.targetId);
-        if (entity) {
-          entity.health = 0;
         }
-        break;
       }
-      default:
-        break;
+
+      // Handle encounter end
+      if (result.ended) {
+        mob.inEncounter = false;
+        mob.aiState = "idle";
+        mob.aggroTarget = null;
+        mob.patrolTarget = null;
+
+        const client = this.room.clients.getById(enc.playerId);
+        if (result.reason === "player_died") {
+          player.health = 0;
+          client?.send("combat_event", { type: "player_died", sourceId: mob.id, targetId: enc.playerId });
+          setTimeout(() => {
+            const respawning = this.room.state.players.get(enc.playerId);
+            if (!respawning) return;
+            respawning.health = respawning.maxHealth;
+            respawning.x = 0;
+            respawning.y = 0;
+            respawning.chunkX = 0;
+            respawning.chunkY = 0;
+            for (const [, m] of this.mobSpawner.getAllMobs()) {
+              if (m.aggroTarget === enc.playerId) {
+                m.aggroTarget = null;
+                m.aiState = "patrol";
+              }
+            }
+            const respawnClient = this.room.clients.getById(enc.playerId);
+            respawnClient?.send("combat_event", {
+              type: "player_respawn",
+              sourceId: enc.playerId,
+              targetId: enc.playerId,
+              currentHp: respawning.health,
+              maxHp: respawning.maxHealth,
+            });
+          }, 3000);
+        }
+      }
+    }
+
+    // Player-turn timeouts
+    const timedOut = this.encounterSystem.tickTimeouts(now);
+    for (const { playerId, encounter: enc } of timedOut) {
+      const client = this.room.clients.getById(playerId);
+      client?.send("combat_event", {
+        type: "encounter_timeout",
+        sourceId: enc.mobId,
+        targetId: playerId,
+      });
     }
   }
 
@@ -296,9 +365,10 @@ export function createGameLoop(
   aoi: AOIManager,
   movementSystem: MovementSystem,
   combatSystem: CombatSystem,
+  encounterSystem: EncounterSystem,
   mobSpawner: MobSpawner,
 ): GameLoop {
-  const loop = new GameLoop(room, db, aoi, movementSystem, combatSystem, mobSpawner);
+  const loop = new GameLoop(room, db, aoi, movementSystem, combatSystem, encounterSystem, mobSpawner);
   const tickInterval = 1000 / TICK_RATE;
   room.setSimulationInterval(loop.tick, tickInterval);
   return loop;

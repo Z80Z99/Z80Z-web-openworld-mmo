@@ -6,7 +6,7 @@ import { NetworkManager } from "./network/index.js";
 import { InputManager, TouchControls } from "./input/index.js";
 import type { InputVector } from "./input/index.js";
 import { GameState } from "./game/index.js";
-import { HUD, CombatUI, IdleUI, MobileUI, QuestUI, CraftingUI, ShopUI, TradeUI, MountUI, TitleUI, TutorialOverlay, ResponsiveLayout } from "./ui/index.js";
+import { HUD, CombatUI, IdleUI, MobileUI, QuestUI, CraftingUI, ShopUI, TradeUI, MountUI, TitleUI, TutorialOverlay, ResponsiveLayout, EncounterPanel } from "./ui/index.js";
 
 /* ── Configuration ── */
 const SEED = DEFAULT_SEED;
@@ -178,6 +178,12 @@ async function main() {
     }
   });
 
+  // Encounter panel UI (DOM overlay — turn-based combat)
+  const encounterPanel = new EncounterPanel(container);
+  encounterPanel.onAction((action) => {
+    network.sendEncounterAction(action);
+  });
+
   // Title display UI (DOM overlay)
   const titleUI = new TitleUI(container);
 
@@ -230,6 +236,64 @@ async function main() {
       mobRenderer.removeMob(entityId);
     },
     onCombatEvent(event) {
+      // ── Turn-based encounter handling ──
+      if (event.type === "encounter_started" && event.mobId) {
+        const mob = gameState.mobs.get(event.mobId);
+        const mobName = mob
+          ? mob.typeId.charAt(0).toUpperCase() + mob.typeId.slice(1)
+          : "Unknown";
+        const mobLevel = mob ? Math.ceil(mob.maxHealth / 20) : 1;
+
+        gameState.inEncounter = true;
+        gameState.encounterMobId = event.mobId;
+        gameState.encounterMobHp = event.mobHp ?? 0;
+        gameState.encounterMobMaxHp = event.mobMaxHp ?? 0;
+        gameState.encounterTurn = "player";
+        gameState.encounterRound = 1;
+
+        encounterPanel.show({
+          mobId: event.mobId,
+          mobName,
+          mobLevel,
+          mobHp: event.mobHp ?? 0,
+          mobMaxHp: event.mobMaxHp ?? 0,
+          turn: "player",
+          round: 1,
+        });
+      }
+
+      if (gameState.inEncounter) {
+        if (event.type === "damage_dealt" && typeof event.damage === "number") {
+          gameState.encounterMobHp = Math.max(0, gameState.encounterMobHp - event.damage);
+          gameState.encounterTurn = "mob";
+          encounterPanel.update({
+            turn: "mob",
+            round: gameState.encounterRound,
+            mobHp: gameState.encounterMobHp,
+          });
+        }
+
+        if (event.type === "player_damaged" && typeof event.damage === "number") {
+          gameState.encounterRound += 1;
+          gameState.encounterTurn = "player";
+          encounterPanel.update({
+            turn: "player",
+            round: gameState.encounterRound,
+            mobHp: gameState.encounterMobHp,
+          });
+        }
+
+        if (
+          event.type === "mob_killed" ||
+          event.type === "encounter_fled" ||
+          event.type === "player_died"
+        ) {
+          gameState.inEncounter = false;
+          gameState.encounterMobId = null;
+          encounterPanel.hide();
+        }
+      }
+
       // Handle combat events from server
       if (event.type === "damage_dealt" || event.type === "player_damaged") {
         const targetId = event.targetId;

@@ -24,7 +24,9 @@ import type Database from "better-sqlite3";
 import { Auth } from "./Auth.js";
 import { AOIManager } from "./AOI.js";
 import { GameLoop, createGameLoop } from "./GameLoop.js";
-import { CombatSystem, hasLeveledUp } from "./CombatSystem.js";
+import { CombatSystem, hasLeveledUp, rollLoot } from "./CombatSystem.js";
+import { EncounterSystem, ENCOUNTER_ENGAGE_RANGE } from "./EncounterSystem.js";
+import { applyCombatEvents, sendEncounterEvent } from "./CombatEffects.js";
 import { MobSpawner } from "./MobSpawner.js";
 import { QuestSystem } from "./QuestSystem.js";
 import { MovementSystem } from "./MovementSystem.js";
@@ -62,6 +64,7 @@ export class GameRoom extends Room<RoomState> {
   private worldGen!: WorldGenerator;
   private db!: Database.Database;
   private combatSystem!: CombatSystem;
+  private encounterSystem!: EncounterSystem;
   private mobSpawner!: MobSpawner;
   private questSystem!: QuestSystem;
   private movementSystem!: MovementSystem;
@@ -104,6 +107,9 @@ export class GameRoom extends Room<RoomState> {
     // Combat system
     this.combatSystem = new CombatSystem();
 
+    // Encounter system (turn-based combat)
+    this.encounterSystem = new EncounterSystem();
+
     // Mount system
     this.mountSystem = new MountSystem(this.db);
 
@@ -132,7 +138,7 @@ export class GameRoom extends Room<RoomState> {
     this.idleSystem = new IdleSystem(this.db, this.worldGen);
 
     // Start game loop
-    this.gameLoop = createGameLoop(this, this.db, this.aoi, this.movementSystem, this.combatSystem, this.mobSpawner);
+    this.gameLoop = createGameLoop(this, this.db, this.aoi, this.movementSystem, this.combatSystem, this.encounterSystem, this.mobSpawner);
 
     // Set patch rate to match tick rate
     this.setPatchRate(1000 / TICK_RATE);
@@ -317,6 +323,20 @@ export class GameRoom extends Room<RoomState> {
 
     // Remove combat stats
     this.combatSystem.removePlayerStats(client.sessionId);
+
+    // End any active encounter and release the mob
+    if (this.encounterSystem.hasEncounter(client.sessionId)) {
+      const enc = this.encounterSystem.getEncounter(client.sessionId);
+      if (enc) {
+        this.encounterSystem.endEncounter(enc, "player_died");
+        const mob = this.mobSpawner.getMob(enc.mobId);
+        if (mob) {
+          mob.inEncounter = false;
+          mob.aiState = "idle";
+          mob.aggroTarget = null;
+        }
+      }
+    }
 
     // Remove mount tracking
     this.mountSystem.removePlayerMount(client.sessionId);
@@ -655,7 +675,7 @@ export class GameRoom extends Room<RoomState> {
       },
     );
 
-    // Attack message — player attacks a mob
+    // Attack message — player attacks a mob (real-time hit, then optional encounter begin)
     this.onMessage("attack", (client, message: { targetId: string }) => {
       if (typeof message.targetId !== "string") return;
       if (!message.targetId.startsWith("mob_")) return;
@@ -670,6 +690,9 @@ export class GameRoom extends Room<RoomState> {
       const PLAYER_ATTACK_RANGE = 2.5;
       const dist = Math.hypot(player.x - mob.x, player.y - mob.y);
       if (dist > PLAYER_ATTACK_RANGE) return;
+
+      // Already in an encounter — ignore the real-time attack message.
+      if (this.encounterSystem.hasEncounter(client.sessionId)) return;
 
       const events = this.combatSystem.processPlayerAttack(
         client.sessionId,
@@ -688,60 +711,19 @@ export class GameRoom extends Room<RoomState> {
         mob.lastCombatTime = Date.now();
       }
 
-      // Apply combat events
-      for (const event of events) {
-        if (event.type === "player_damaged" || event.type === "player_died") {
-          // Mob damage to player — update player health
-          if (event.currentHp !== undefined) {
-            player.health = event.currentHp;
-          }
-        }
-
-        if (event.type === "mob_killed") {
-          // Sync mob death to clients
-          const entity = this.state.entities.get(mob.id);
-          if (entity) {
-            entity.health = 0;
-          }
-        }
-
-        if (event.type === "damage_dealt") {
-          // Update mob health in entity state
-          const entity = this.state.entities.get(mob.id);
-          if (entity && event.currentHp !== undefined) {
-            entity.health = event.currentHp;
-          }
-        }
-
-        // Send combat event to relevant clients
-        if (event.type === "damage_dealt" || event.type === "mob_killed" ||
-            event.type === "xp_gained" || event.type === "loot_dropped") {
-          const combatClient = this.clients.getById(client.sessionId);
-          if (combatClient) {
-            combatClient.send("combat_event", event);
-          }
-        }
-
-        if (event.type === "player_damaged" || event.type === "player_died") {
-          // Send damage event to the player
-          const targetClient = this.clients.getById(event.targetId);
-          if (targetClient) {
-            targetClient.send("combat_event", event);
-          }
-        }
-
-        if (event.type === "loot_dropped" && event.loot?.length) {
-          // Persist combat loot straight into the player's inventory.
-          const authData = (client as any).authData as ClientAuthData | undefined;
-          if (authData?.playerId) {
-            const inventory = this.getPlayerInventory(authData.playerId);
-            for (const itemId of event.loot) {
-              inventory.set(itemId, (inventory.get(itemId) ?? 0) + 1);
-            }
-            this.savePlayerInventory(authData.playerId, inventory);
-          }
-        }
-      }
+      // Apply combat events to state + clients + inventory
+      applyCombatEvents(
+        this,
+        events,
+        mob,
+        client.sessionId,
+        (playerId) => this.getPlayerInventory(playerId),
+        (playerId, inv) => this.savePlayerInventory(playerId, inv),
+        (sid) => {
+          const c = this.clients.getById(sid);
+          return c ? (c as any).authData as ClientAuthData | undefined : undefined;
+        },
+      );
 
       // Sync XP to schema and apply any level-ups from this kill.
       const stats = this.combatSystem.getPlayerStats(client.sessionId);
@@ -770,7 +752,192 @@ export class GameRoom extends Room<RoomState> {
         player.xp = stats.xp;
         player.xpToNextLevel = stats.xpToNextLevel;
       }
+
+      // Begin turn-based encounter if mob survived and is within engage range.
+      if (mob.currentHp > 0) {
+        const engageDist = Math.hypot(player.x - mob.x, player.y - mob.y);
+        if (engageDist <= ENCOUNTER_ENGAGE_RANGE) {
+          const pStats = this.combatSystem.getPlayerStats(client.sessionId);
+          const result = this.encounterSystem.beginEncounter(
+            client.sessionId,
+            mob.id,
+            "player",
+            { mobHp: mob.currentHp, mobMaxHp: mob.maxHp, playerHp: player.health, playerMaxHp: player.maxHealth },
+            Date.now(),
+          );
+          if (result.encounter) {
+            mob.aiState = "fighting";
+            mob.inEncounter = true;
+            mob.aggroTarget = null;
+            sendEncounterEvent(this, client.sessionId, {
+              type: "encounter_started",
+              mobId: mob.id,
+              mobHp: mob.currentHp,
+              mobMaxHp: mob.maxHp,
+              playerHp: player.health,
+              playerMaxHp: player.maxHealth,
+              attack: pStats.attack,
+              defense: pStats.defense,
+              level: player.level,
+            });
+          }
+        }
+      }
     });
+
+    // Turn-based encounter action (attack / defend / flee)
+    this.onMessage(
+      "encounter_action",
+      (client, message: { action: "attack" | "defend" | "flee" }) => {
+        if (!message.action) return;
+        if (typeof message.action !== "string") return;
+
+        const player = this.state.players.get(client.sessionId);
+        if (!player || player.health <= 0) return;
+
+        const encounter = this.encounterSystem.getEncounter(client.sessionId);
+        if (!encounter) return;
+
+        const mob = this.mobSpawner.getMob(encounter.mobId);
+        if (!mob || mob.aiState === "dead") return;
+
+        const pStats = this.combatSystem.getPlayerStats(client.sessionId);
+        const result = this.encounterSystem.playerAction(
+          encounter,
+          message.action,
+          {
+            attack: pStats.attack,
+            level: player.level,
+            mobDefense: mob.config.baseDefense,
+            playerDefense: pStats.defense,
+            mobMaxHp: mob.maxHp,
+          },
+          Math.random,
+          Date.now(),
+        );
+
+        if (result.error) return;
+
+        // Apply encounter events
+        for (const evt of result.events) {
+          if (evt.type === "damage_dealt" && typeof evt.damage === "number") {
+            const entity = this.state.entities.get(mob.id);
+            if (entity) entity.health = Math.max(0, mob.currentHp - evt.damage);
+            mob.currentHp = Math.max(0, mob.currentHp - evt.damage);
+          }
+
+          if (evt.type === "player_damaged" && typeof evt.damage === "number") {
+            player.health = Math.max(0, player.health - evt.damage);
+          }
+
+          sendEncounterEvent(this, client.sessionId, {
+            ...evt,
+            currentHp: evt.type === "player_damaged" ? player.health : mob.currentHp,
+            maxHp: evt.type === "player_damaged" ? player.maxHealth : mob.maxHp,
+          });
+        }
+
+        // Handle encounter end
+        if (result.ended) {
+          mob.inEncounter = false;
+          mob.aiState = "idle";
+          mob.aggroTarget = null;
+          mob.patrolTarget = null;
+
+          if (result.reason === "victory") {
+            mob.currentHp = 0;
+            mob.aiState = "dead";
+            mob.deathTime = Date.now();
+            const entity = this.state.entities.get(mob.id);
+            if (entity) entity.health = 0;
+
+            // XP + loot
+            const xpGain = mob.config.level * 10;
+            pStats.xp += xpGain;
+
+            sendEncounterEvent(this, client.sessionId, {
+              type: "mob_killed",
+              sourceId: client.sessionId,
+              targetId: mob.id,
+            });
+            sendEncounterEvent(this, client.sessionId, {
+              type: "xp_gained",
+              sourceId: client.sessionId,
+              targetId: mob.id,
+              xp: xpGain,
+            });
+
+            const loot = rollLoot(mob.config.lootTable);
+            if (loot.length > 0) {
+              const authData = (client as any).authData as ClientAuthData | undefined;
+              if (authData?.playerId) {
+                const inventory = this.getPlayerInventory(authData.playerId);
+                for (const itemId of loot) {
+                  inventory.set(itemId, (inventory.get(itemId) ?? 0) + 1);
+                }
+                this.savePlayerInventory(authData.playerId, inventory);
+              }
+              sendEncounterEvent(this, client.sessionId, {
+                type: "loot_dropped",
+                sourceId: client.sessionId,
+                targetId: mob.id,
+                loot,
+              });
+            }
+
+            // Level-ups
+            while (hasLeveledUp(pStats.xp, pStats.xpToNextLevel)) {
+              pStats.xp -= pStats.xpToNextLevel;
+              player.level += 1;
+              pStats.attack += 2;
+              pStats.defense += 1;
+              pStats.xpToNextLevel = 100 * player.level;
+              player.maxHealth += 20;
+              player.health = player.maxHealth;
+
+              sendEncounterEvent(this, client.sessionId, {
+                type: "level_up",
+                sourceId: client.sessionId,
+                targetId: client.sessionId,
+                level: player.level,
+                attack: pStats.attack,
+                defense: pStats.defense,
+                currentHp: player.health,
+                maxHp: player.maxHealth,
+              });
+            }
+            player.xp = pStats.xp;
+            player.xpToNextLevel = pStats.xpToNextLevel;
+          }
+
+          if (result.reason === "player_died") {
+            player.health = 0;
+            setTimeout(() => {
+              const respawning = this.state.players.get(client.sessionId);
+              if (!respawning) return;
+              respawning.health = respawning.maxHealth;
+              respawning.x = 0;
+              respawning.y = 0;
+              respawning.chunkX = 0;
+              respawning.chunkY = 0;
+              for (const [, m] of this.mobSpawner.getAllMobs()) {
+                if (m.aggroTarget === client.sessionId) {
+                  m.aggroTarget = null;
+                  m.aiState = "patrol";
+                }
+              }
+              sendEncounterEvent(this, client.sessionId, {
+                type: "player_respawn",
+                sourceId: client.sessionId,
+                targetId: client.sessionId,
+                currentHp: respawning.health,
+                maxHp: respawning.maxHealth,
+              });
+            }, 3000);
+          }
+        }
+      },
+    );
 
     // Quest event reporting
     this.onMessage(

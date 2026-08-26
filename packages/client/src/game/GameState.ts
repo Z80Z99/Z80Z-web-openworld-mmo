@@ -86,6 +86,14 @@ export class GameState {
   /** Pending combat events to process. */
   public readonly pendingCombatEvents: CombatEvent[] = [];
 
+  /* ── Turn-based encounter state ── */
+  public inEncounter = false;
+  public encounterMobId: string | null = null;
+  public encounterMobHp = 0;
+  public encounterMobMaxHp = 0;
+  public encounterTurn: "player" | "mob" = "player";
+  public encounterRound = 0;
+
   /** Client-side chunk prediction generator (seed must match server). */
   private readonly worldGen: WorldGenerator;
 
