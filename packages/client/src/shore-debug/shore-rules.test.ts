@@ -174,7 +174,7 @@ describe('shore-rules', () => {
     });
   });
 
-  // ── getShoreTiles: new default policy (0 or 1 tile per mask) ────────
+  // ── getShoreTiles: multi-overlay decomposition (0-4 tiles per mask) ─
 
   describe('getShoreTiles - mask 0', () => {
     it('mask=0 returns empty array', () => {
@@ -277,10 +277,11 @@ describe('shore-rules', () => {
       expect(tiles[0]).toEqual({ type: 'concave', index: 5, direction: 'E' });
     });
 
-    it('mask=24 (W+E) → concave5 E (E beats W by priority)', () => {
+    it('mask=24 (W+E) → both straights [E, W] (multi-overlay)', () => {
       const tiles = getShoreTiles(24);
-      expect(tiles).toHaveLength(1);
+      expect(tiles).toHaveLength(2);
       expect(tiles[0]).toEqual({ type: 'concave', index: 5, direction: 'E' });
+      expect(tiles[1]).toEqual({ type: 'concave', index: 4, direction: 'W' });
     });
 
     it('mask=40 (SW+W) → concave4 W', () => {
@@ -309,66 +310,76 @@ describe('shore-rules', () => {
   });
 
   describe('getShoreTiles - mixed edge+diagonal pairs', () => {
-    it('mask=17 (NW+E) → concave5 E', () => {
+    it('mask=17 (NW+E) → convex1 NW + concave5 E (flank-free diagonal stacks under band)', () => {
       const tiles = getShoreTiles(17);
-      expect(tiles).toHaveLength(1);
-      expect(tiles[0]).toEqual({ type: 'concave', index: 5, direction: 'E' });
+      expect(tiles).toHaveLength(2);
+      expect(tiles[0]).toEqual({ type: 'convex', index: 1, direction: 'NW' });
+      expect(tiles[1]).toEqual({ type: 'concave', index: 5, direction: 'E' });
     });
 
-    it('mask=12 (NE+W) → concave4 W', () => {
+    it('mask=12 (NE+W) → convex2 NE + concave4 W (flank-free diagonal stacks under band)', () => {
       const tiles = getShoreTiles(12);
-      expect(tiles).toHaveLength(1);
-      expect(tiles[0]).toEqual({ type: 'concave', index: 4, direction: 'W' });
+      expect(tiles).toHaveLength(2);
+      expect(tiles[0]).toEqual({ type: 'convex', index: 2, direction: 'NE' });
+      expect(tiles[1]).toEqual({ type: 'concave', index: 4, direction: 'W' });
     });
 
-    it('mask=48 (E+SW) → concave5 E', () => {
+    it('mask=48 (E+SW) → convex4 SW + concave5 E (flank-free diagonal stacks under band)', () => {
       const tiles = getShoreTiles(48);
-      expect(tiles).toHaveLength(1);
-      expect(tiles[0]).toEqual({ type: 'concave', index: 5, direction: 'E' });
+      expect(tiles).toHaveLength(2);
+      expect(tiles[0]).toEqual({ type: 'convex', index: 4, direction: 'SW' });
+      expect(tiles[1]).toEqual({ type: 'concave', index: 5, direction: 'E' });
     });
 
-    it('mask=66 (N+S) → concave2 N', () => {
+    it('mask=66 (N+S) → both straights [N, S] (multi-overlay)', () => {
       const tiles = getShoreTiles(66);
-      expect(tiles).toHaveLength(1);
+      expect(tiles).toHaveLength(2);
       expect(tiles[0]).toEqual({ type: 'concave', index: 2, direction: 'N' });
+      expect(tiles[1]).toEqual({ type: 'concave', index: 7, direction: 'S' });
     });
   });
 
   describe('getShoreTiles - diagonal-only pairs', () => {
-    it('mask=5 (NW+NE) → convex1 NW (NW priority)', () => {
+    it('mask=5 (NW+NE) → both corners [NW, NE] (multi-overlay)', () => {
       const tiles = getShoreTiles(5);
-      expect(tiles).toHaveLength(1);
+      expect(tiles).toHaveLength(2);
       expect(tiles[0]).toEqual({ type: 'convex', index: 1, direction: 'NW' });
+      expect(tiles[1]).toEqual({ type: 'convex', index: 2, direction: 'NE' });
     });
 
-    it('mask=33 (SW+NW) → convex1 NW (NW priority)', () => {
+    it('mask=33 (SW+NW) → both corners [NW, SW] (multi-overlay)', () => {
       const tiles = getShoreTiles(33);
-      expect(tiles).toHaveLength(1);
+      expect(tiles).toHaveLength(2);
       expect(tiles[0]).toEqual({ type: 'convex', index: 1, direction: 'NW' });
+      expect(tiles[1]).toEqual({ type: 'convex', index: 4, direction: 'SW' });
     });
 
-    it('mask=129 (NW+SE) → convex1 NW (NW priority)', () => {
+    it('mask=129 (NW+SE) → both corners [NW, SE] (multi-overlay)', () => {
       const tiles = getShoreTiles(129);
-      expect(tiles).toHaveLength(1);
+      expect(tiles).toHaveLength(2);
       expect(tiles[0]).toEqual({ type: 'convex', index: 1, direction: 'NW' });
+      expect(tiles[1]).toEqual({ type: 'convex', index: 3, direction: 'SE' });
     });
 
-    it('mask=36 (NE+SW) → convex2 NE (NE priority)', () => {
+    it('mask=36 (NE+SW) → both corners [NE, SW] (multi-overlay)', () => {
       const tiles = getShoreTiles(36);
-      expect(tiles).toHaveLength(1);
+      expect(tiles).toHaveLength(2);
       expect(tiles[0]).toEqual({ type: 'convex', index: 2, direction: 'NE' });
+      expect(tiles[1]).toEqual({ type: 'convex', index: 4, direction: 'SW' });
     });
 
-    it('mask=132 (NE+SE) → convex2 NE (NE priority)', () => {
+    it('mask=132 (NE+SE) → both corners [NE, SE] (multi-overlay)', () => {
       const tiles = getShoreTiles(132);
-      expect(tiles).toHaveLength(1);
+      expect(tiles).toHaveLength(2);
       expect(tiles[0]).toEqual({ type: 'convex', index: 2, direction: 'NE' });
+      expect(tiles[1]).toEqual({ type: 'convex', index: 3, direction: 'SE' });
     });
 
-    it('mask=160 (SW+SE) → convex3 SE (SE beats SW)', () => {
+    it('mask=160 (SW+SE) → both corners [SW, SE] (multi-overlay)', () => {
       const tiles = getShoreTiles(160);
-      expect(tiles).toHaveLength(1);
-      expect(tiles[0]).toEqual({ type: 'convex', index: 3, direction: 'SE' });
+      expect(tiles).toHaveLength(2);
+      expect(tiles[0]).toEqual({ type: 'convex', index: 4, direction: 'SW' });
+      expect(tiles[1]).toEqual({ type: 'convex', index: 3, direction: 'SE' });
     });
   });
 
@@ -385,10 +396,11 @@ describe('shore-rules', () => {
       expect(tiles[0]).toEqual({ type: 'concave', index: 1, direction: 'NW' });
     });
 
-    it('mask=28 (NE+W+E) → concave5 E', () => {
+    it('mask=28 (NE+W+E) → opposite straights [E, W] (NE suppressed by E flank)', () => {
       const tiles = getShoreTiles(28);
-      expect(tiles).toHaveLength(1);
+      expect(tiles).toHaveLength(2);
       expect(tiles[0]).toEqual({ type: 'concave', index: 5, direction: 'E' });
+      expect(tiles[1]).toEqual({ type: 'concave', index: 4, direction: 'W' });
     });
 
     it('mask=22 (N+NE+E) → concave3 NE (N&E quadrant wins)', () => {
@@ -409,10 +421,11 @@ describe('shore-rules', () => {
       expect(tiles[0]).toEqual({ type: 'concave', index: 1, direction: 'NW' });
     });
 
-    it('mask=31 (NW+N+NE+W+E) → concave1 NW (N&W quadrant wins)', () => {
+    it('mask=31 (NW+N+NE+W+E) → NW pair + lone E straight (multi-overlay)', () => {
       const tiles = getShoreTiles(31);
-      expect(tiles).toHaveLength(1);
-      expect(tiles[0]).toEqual({ type: 'concave', index: 1, direction: 'NW' });
+      expect(tiles).toHaveLength(2);
+      expect(tiles[0]).toEqual({ type: 'concave', index: 5, direction: 'E' });
+      expect(tiles[1]).toEqual({ type: 'concave', index: 1, direction: 'NW' });
     });
 
     it('mask=104 (S+SW+W) → concave6 SW (S&W quadrant wins)', () => {
@@ -447,22 +460,117 @@ describe('shore-rules', () => {
   });
 
   describe('getShoreTiles - four+ direction masks', () => {
-    it('mask=90 (N+E+S+W) → concave1 NW (N&W quadrant wins fixed order)', () => {
+    it('mask=90 (N+E+S+W) → two disjoint L-pairs [NW, SE] (multi-overlay)', () => {
       const tiles = getShoreTiles(90);
-      expect(tiles).toHaveLength(1);
+      expect(tiles).toHaveLength(2);
       expect(tiles[0]).toEqual({ type: 'concave', index: 1, direction: 'NW' });
+      expect(tiles[1]).toEqual({ type: 'concave', index: 8, direction: 'SE' });
     });
 
-    it('mask=165 (4 diagonals) → convex1 NW (NW priority)', () => {
+    it('mask=165 (4 diagonals) → all four corners ascending bit order (multi-overlay)', () => {
       const tiles = getShoreTiles(165);
-      expect(tiles).toHaveLength(1);
+      expect(tiles).toHaveLength(4);
       expect(tiles[0]).toEqual({ type: 'convex', index: 1, direction: 'NW' });
+      expect(tiles[1]).toEqual({ type: 'convex', index: 2, direction: 'NE' });
+      expect(tiles[2]).toEqual({ type: 'convex', index: 4, direction: 'SW' });
+      expect(tiles[3]).toEqual({ type: 'convex', index: 3, direction: 'SE' });
     });
 
-    it('mask=255 (full ring) → concave1 NW (N&W quadrant wins fixed order)', () => {
+    it('mask=255 (full ring) → two disjoint L-pairs [NW, SE], diagonals suppressed (multi-overlay)', () => {
       const tiles = getShoreTiles(255);
-      expect(tiles).toHaveLength(1);
+      expect(tiles).toHaveLength(2);
       expect(tiles[0]).toEqual({ type: 'concave', index: 1, direction: 'NW' });
+      expect(tiles[1]).toEqual({ type: 'concave', index: 8, direction: 'SE' });
+    });
+  });
+
+  // ── Multi-overlay decomposition contract ─────────────────────────────
+  // Complex masks decompose into ORDERED overlay sets:
+  //   [convex corners (asc bit NW,NE,SW,SE)] → [straights (N,E,S,W)] → [L-pairs]
+  // Rationale: shore PNGs are fully opaque; sequential drawing is last-wins,
+  // so the widest-coverage texture (quadrant L) draws last and dominates
+  // visually, while the full deterministic set stays available to the API,
+  // debug tooling and any future transparent variants.
+  describe('getShoreTiles - multi-overlay decomposition', () => {
+    it('is deterministic for complex masks (same input -> same array)', () => {
+      expect(getShoreTiles(90)).toEqual(getShoreTiles(90));
+      expect(getShoreTiles(255)).toEqual(getShoreTiles(255));
+      expect(getShoreTiles(82)).toEqual(getShoreTiles(82));
+    });
+
+    it('emits no duplicate type+index entries (mask=255)', () => {
+      const tiles = getShoreTiles(255);
+      const keys = tiles.map((t) => `${t.type}:${t.index}`);
+      expect(new Set(keys).size).toBe(keys.length);
+    });
+
+    it('orders corners before straights before L-pairs (mask=N+E+SW)', () => {
+      // N+E form the NE quadrant pair; SW diagonal flanks are absent -> convex.
+      const tiles = getShoreTiles(Direction.N | Direction.E | Direction.SW);
+      expect(tiles).toEqual([
+        { type: 'convex', index: 4, direction: 'SW' },
+        { type: 'concave', index: 3, direction: 'NE' },
+      ]);
+    });
+
+    it('opposite pair N+S emits both straights in N,E,S,W order', () => {
+      expect(getShoreTiles(Direction.N | Direction.S)).toEqual([
+        { type: 'concave', index: 2, direction: 'N' },
+        { type: 'concave', index: 7, direction: 'S' },
+      ]);
+    });
+
+    it('opposite pair E+W emits both straights', () => {
+      expect(getShoreTiles(Direction.E | Direction.W)).toEqual([
+        { type: 'concave', index: 5, direction: 'E' },
+        { type: 'concave', index: 4, direction: 'W' },
+      ]);
+    });
+
+    it('triple N+E+S (bay open south): NE pair + S straight', () => {
+      expect(getShoreTiles(Direction.N | Direction.E | Direction.S)).toEqual([
+        { type: 'concave', index: 7, direction: 'S' },
+        { type: 'concave', index: 3, direction: 'NE' },
+      ]);
+    });
+
+    it('triple N+E+W: NW pair + E straight', () => {
+      expect(getShoreTiles(Direction.N | Direction.E | Direction.W)).toEqual([
+        { type: 'concave', index: 5, direction: 'E' },
+        { type: 'concave', index: 1, direction: 'NW' },
+      ]);
+    });
+
+    it('quad cardinals: two disjoint L-pairs [NW, SE]', () => {
+      expect(
+        getShoreTiles(Direction.N | Direction.E | Direction.S | Direction.W),
+      ).toEqual([
+        { type: 'concave', index: 1, direction: 'NW' },
+        { type: 'concave', index: 8, direction: 'SE' },
+      ]);
+    });
+
+    it('full ring (all 8 land neighbours): two disjoint L-pairs, diagonals suppressed', () => {
+      expect(getShoreTiles(255)).toEqual([
+        { type: 'concave', index: 1, direction: 'NW' },
+        { type: 'concave', index: 8, direction: 'SE' },
+      ]);
+    });
+
+    it('all four diagonals emit all four convex corners ascending by bit', () => {
+      expect(getShoreTiles(165)).toEqual([
+        { type: 'convex', index: 1, direction: 'NW' },
+        { type: 'convex', index: 2, direction: 'NE' },
+        { type: 'convex', index: 4, direction: 'SW' },
+        { type: 'convex', index: 3, direction: 'SE' },
+      ]);
+    });
+
+    it('cardinal + non-flanking diagonal stacks convex under straight (N+SW)', () => {
+      expect(getShoreTiles(Direction.N | Direction.SW)).toEqual([
+        { type: 'convex', index: 4, direction: 'SW' },
+        { type: 'concave', index: 2, direction: 'N' },
+      ]);
     });
   });
 

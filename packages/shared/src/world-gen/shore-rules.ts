@@ -73,15 +73,68 @@ export function clearShoreRules(): void {
 
 // ── Core Logic ─────────────────────────────────────────────────────
 
+/** Cardinal-bit subset mask used by shore decomposition. */
+const SHORE_CARDINALS = Direction.N | Direction.E | Direction.S | Direction.W;
+
 /**
- * Given a neighbor mask (bitmask of LAND neighbors), return which shore
- * tiles should be drawn on this water tile.
+ * Adjacent cardinal pair -> quadrant L concave tile, greedy slot order.
+ * Pixel-verified art: shore1 paints N+W, shore3 N+E, shore6 S+W, shore8 S+E.
+ */
+const SHORE_PAIR_SLOTS = [
+  { a: Direction.N, b: Direction.W, index: 1, direction: 'NW' as const },
+  { a: Direction.N, b: Direction.E, index: 3, direction: 'NE' as const },
+  { a: Direction.S, b: Direction.W, index: 6, direction: 'SW' as const },
+  { a: Direction.S, b: Direction.E, index: 8, direction: 'SE' as const },
+];
+
+/**
+ * Lone cardinal -> straight band concave tile, fixed emission order N, E, S, W.
+ * Pixel-verified art: shore2=N, shore5=E, shore7=S, shore4=W.
+ */
+const SHORE_STRAIGHTS = [
+  { bit: Direction.N, index: 2, direction: 'N' as const },
+  { bit: Direction.E, index: 5, direction: 'E' as const },
+  { bit: Direction.S, index: 7, direction: 'S' as const },
+  { bit: Direction.W, index: 4, direction: 'W' as const },
+];
+
+/**
+ * Diagonal -> convex corner rounding tile with its two flanking cardinals;
+ * emitted only when both flanks are absent from the mask. Pixel-verified
+ * art: convex1=NW corner, convex2=NE, convex4=SW, convex3=SE.
+ */
+const SHORE_CONVEX_CORNERS = [
+  { diag: Direction.NW, a: Direction.N, b: Direction.W, index: 1, direction: 'NW' as const },
+  { diag: Direction.NE, a: Direction.N, b: Direction.E, index: 2, direction: 'NE' as const },
+  { diag: Direction.SW, a: Direction.S, b: Direction.W, index: 4, direction: 'SW' as const },
+  { diag: Direction.SE, a: Direction.S, b: Direction.E, index: 3, direction: 'SE' as const },
+];
+
+/**
+ * Given a neighbor mask (bitmask of LAND neighbors), decompose it into the
+ * ordered set of shore tiles to draw on this water tile.
  *
- * Default behavior: each land neighbor direction maps to its concave shore tile.
+ * Default behavior — deterministic 3-stage decomposition (mirrors
+ * getGroundEdgeTiles):
+ *   1. Adjacent cardinal pairs -> quadrant L concave tiles, greedy slot
+ *      order NW(1), NE(3), SW(6), SE(8); consumed cardinals never reused,
+ *      so four-way masks yield two disjoint L-tiles.
+ *   2. Remaining lone cardinals -> straight bands in fixed order N(2),
+ *      E(5), S(7), W(4).
+ *   3. Diagonal contacts -> convex corner rounding in ascending bit order
+ *      NW(1), NE(2), SW(4), SE(3), emitted only when BOTH flanking
+ *      cardinals are absent from the mask (a flanking band already paints
+ *      that corner region).
+ *
+ * Return order: [...corners, ...straights, ...pairs]. Shore PNGs are fully
+ * opaque, so sequential drawing is last-wins — the widest-coverage L-pair
+ * draws last and dominates visually, while the complete set stays available
+ * to debug tooling and any future transparent variants.
+ *
  * Custom rules can override specific masks via registerShoreRule().
  *
  * @param mask Bitmask where each bit represents a land neighbor in that direction
- * @returns Array of shore tiles to render (deterministic, no randomness)
+ * @returns Array of 0-4 shore tiles to render (deterministic, no randomness)
  */
 export function getShoreTiles(mask: number): ShoreTile[] {
   // Check for registered custom rule first
@@ -114,33 +167,49 @@ export function getShoreTiles(mask: number): ShoreTile[] {
     return tiles;
   }
 
-  // Default: return 0 or 1 tile per mask
+  // Default: decompose into an ordered overlay set. Pixel-verified asset
+  // vocabulary (water-blue base + directional sand band art):
+  //   concave 1=N+W L, 2=N, 3=N+E L, 4=W, 5=E, 6=S+W L, 7=S, 8=S+E L
+  //   convex 1=NW corner, 2=NE corner, 3=SE corner, 4=SW corner
   if (mask === 0) return [];
 
-  const edges = mask & (Direction.N | Direction.E | Direction.S | Direction.W);
+  const pairs: ShoreTile[] = [];
+  const straights: ShoreTile[] = [];
+  const corners: ShoreTile[] = [];
 
-  if (edges === 0) {
-    // Diagonal-only → convex art; priority NW > NE > SE > SW
-    if (mask & Direction.NW) return [{ type: 'convex', index: 1, direction: 'NW' }];
-    if (mask & Direction.NE) return [{ type: 'convex', index: 2, direction: 'NE' }];
-    if (mask & Direction.SE) return [{ type: 'convex', index: 3, direction: 'SE' }];
-    if (mask & Direction.SW) return [{ type: 'convex', index: 4, direction: 'SW' }];
-    return [];
+  // Stage 1: adjacent cardinal pairs -> quadrant L tiles, greedy slot order
+  // NW, NE, SW, SE — a cardinal consumed by a slot is never reused, so
+  // four-way masks yield two disjoint L-tiles instead of one.
+  let remaining = mask & SHORE_CARDINALS;
+  for (const { a, b, index, direction } of SHORE_PAIR_SLOTS) {
+    if ((remaining & a) !== 0 && (remaining & b) !== 0) {
+      pairs.push({ type: 'concave', index, direction });
+      remaining &= ~(a | b);
+    }
   }
 
-  // Quadrant pairs first, fixed check order: N&W, N&E, S&W, S&E
-  if ((mask & Direction.N) && (mask & Direction.W)) return [{ type: 'concave', index: 1, direction: 'NW' }];
-  if ((mask & Direction.N) && (mask & Direction.E)) return [{ type: 'concave', index: 3, direction: 'NE' }];
-  if ((mask & Direction.S) && (mask & Direction.W)) return [{ type: 'concave', index: 6, direction: 'SW' }];
-  if ((mask & Direction.S) && (mask & Direction.E)) return [{ type: 'concave', index: 8, direction: 'SE' }];
+  // Stage 2: lone cardinals -> straight bands, fixed emission order N, E, S, W.
+  for (const { bit, index, direction } of SHORE_STRAIGHTS) {
+    if ((remaining & bit) !== 0) {
+      straights.push({ type: 'concave', index, direction });
+      remaining &= ~bit;
+    }
+  }
 
-  // Single edge by priority: N > E > S > W
-  if (mask & Direction.N) return [{ type: 'concave', index: 2, direction: 'N' }];
-  if (mask & Direction.E) return [{ type: 'concave', index: 5, direction: 'E' }];
-  if (mask & Direction.S) return [{ type: 'concave', index: 7, direction: 'S' }];
-  if (mask & Direction.W) return [{ type: 'concave', index: 4, direction: 'W' }];
+  // Stage 3: diagonal contacts -> convex corner rounding, ascending bit order
+  // NW, NE, SW, SE. Emitted only when BOTH flanking cardinals are absent from
+  // the ORIGINAL mask — a flanking band already paints that corner region.
+  for (const { diag, a, b, index, direction } of SHORE_CONVEX_CORNERS) {
+    if ((mask & diag) !== 0 && (mask & a) === 0 && (mask & b) === 0) {
+      corners.push({ type: 'convex', index, direction });
+    }
+  }
 
-  return [];
+  // Order: corners first, straights middle, L-pairs last. The PNGs are fully
+  // opaque, so sequential drawing is last-wins — the widest-coverage texture
+  // must dominate visually while the complete deterministic set stays available
+  // to the API, debug tooling and any future transparent variants.
+  return [...corners, ...straights, ...pairs];
 }
 
 // ── Utility Functions ──────────────────────────────────────────────
