@@ -70,6 +70,15 @@ export class HUD {
     this.fpsDisplay.textContent = "FPS: 0";
     this.container.appendChild(this.fpsDisplay);
 
+    // Combat controls hint (top-center)
+    const combatHint = document.createElement("div");
+    combatHint.style.cssText = `
+      position:absolute; top:12px; left:50%; transform:translateX(-50%);
+      font-size:12px; color:#ddd; text-shadow:1px 1px 2px #000; white-space:nowrap;
+    `;
+    combatHint.textContent = "点击/Tab 选怪 · 空格 攻击 · Enter 聊天";
+    this.container.appendChild(combatHint);
+
     // Chat input (bottom center, hidden by default)
     const chatWrapper = document.createElement("div");
     chatWrapper.style.cssText = `

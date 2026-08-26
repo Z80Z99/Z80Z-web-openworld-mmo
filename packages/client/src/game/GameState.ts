@@ -3,6 +3,7 @@ import {
   type EntityState,
   type ChatMessage,
   type ClientMessage,
+  type CombatEventPayload,
   CHUNK_SIZE,
   TileType,
 } from "@mmo/shared";
@@ -54,16 +55,7 @@ export interface MobState {
 }
 
 /** Combat event received from the server. */
-export interface CombatEvent {
-  type: string;
-  sourceId: string;
-  targetId: string;
-  damage?: number;
-  xp?: number;
-  loot?: string[];
-  currentHp?: number;
-  maxHp?: number;
-}
+export type CombatEvent = CombatEventPayload;
 
 /**
  * Client-side game state.

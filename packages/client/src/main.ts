@@ -290,6 +290,34 @@ async function main() {
       if (event.type === "mob_killed") {
         network.sendQuestEvent("kill", event.mobType);
       }
+
+      if (event.type === "level_up") {
+        // Server is authoritative: sync level/xp from the payload.
+        const local = gameState.localPlayer;
+        if (local) {
+          if (event.level !== undefined) local.level = event.level;
+          gameState.xp = 0;
+        }
+        const screenX = (local?.x ?? 0) * 16 - camera.x + camera.viewportWidth / 2;
+        const screenY = (local?.y ?? 0) * 16 - camera.y + camera.viewportHeight / 2 - 40;
+        combatUI.addDamageNumber(
+          `lvl_${damageCounter++}`,
+          `LEVEL UP! ${event.level ?? ""}`,
+          screenX,
+          screenY,
+          true,
+        );
+      }
+
+      if (event.type === "player_respawn") {
+        // Server teleports us to spawn with full HP; reset local prediction.
+        const local = gameState.localPlayer;
+        if (local) {
+          local.x = 0;
+          local.y = 0;
+          local.health = event.currentHp ?? local.maxHealth;
+        }
+      }
     },
     onChat(sender, content) {
       hud.addChatMessage(sender, content);
