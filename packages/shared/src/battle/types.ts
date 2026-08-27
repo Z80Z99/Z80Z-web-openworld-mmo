@@ -194,3 +194,17 @@ export interface CombatSession {
   /** Combat participants, keyed by participantId. */
   readonly participants: readonly CombatParticipantState[];
 }
+
+/* ── CombatManager Error Codes (Phase 3C) ── */
+
+/** Error codes returned by CombatManager public methods. */
+export type CombatManagerError =
+  | "INVALID_COMBAT_ID"
+  | "COMBAT_ALREADY_EXISTS"
+  | "COMBAT_NOT_FOUND"
+  | "ACTIVE_COMBAT_EXISTS_FOR_BATTLE"
+  | "INVALID_BATTLE_ID"
+  | "PARTICIPANT_NOT_FOUND"
+  | "PARTICIPANT_ALREADY_IN_COMBAT"
+  | "COMBAT_NOT_ACTIVE"
+  | "NO_ALIVE_PARTICIPANTS";

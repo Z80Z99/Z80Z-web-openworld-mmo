@@ -33,4 +33,6 @@ export type {
   CombatState,
   CombatParticipantState,
   CombatSession,
+  /* ── Phase 3C: CombatManager ── */
+  CombatManagerError,
 } from "./types.js";
