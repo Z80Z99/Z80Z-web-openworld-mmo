@@ -29,7 +29,8 @@ export type BattleManagerError =
   | "PARTICIPANT_NOT_IN_BATTLE"
   | "PARTICIPANT_NOT_ON_SIDE"
   | "LEADER_NOT_ON_SIDE"
-  | "BATTLE_NOT_RESOLVED";
+  | "BATTLE_NOT_RESOLVED"
+  | "POSITION_NOT_FINITE";
 
 type MutableParticipant = {
   id: string;
@@ -317,6 +318,35 @@ export class BattleManager {
     if (side.leaderId === participantId) {
       side.area.center = copyPoint(position);
       this.recalculateRadius(side);
+    }
+    return { battle: toSnapshotBattle(battle) };
+  }
+
+  /**
+   * Synchronize a participant's world position into the battle runtime.
+   * Uses the reverse index — caller does not need to know the battle ID.
+   * If the participant is the side's leader, the BattleArea center follows.
+   *
+   * Phase 2A: World → BattleManager position synchronization.
+   */
+  syncParticipantPosition(
+    participantId: string,
+    position: CombatPoint,
+  ): BattleResult {
+    if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) {
+      return { error: "POSITION_NOT_FINITE" };
+    }
+    const entry = this.participantIndex.get(participantId);
+    if (!entry) return { error: "PARTICIPANT_NOT_IN_BATTLE" };
+    const battle = this.battles.get(entry.battleId);
+    if (!battle) return { error: "BATTLE_NOT_FOUND" };
+    const side = this.getSide(battle, entry.sideId);
+    const participant = side ? getParticipant(side, participantId) : undefined;
+    if (!side || !participant) return { error: "PARTICIPANT_NOT_IN_BATTLE" };
+
+    participant.position = copyPoint(position);
+    if (side.leaderId === participantId) {
+      side.area.center = copyPoint(position);
     }
     return { battle: toSnapshotBattle(battle) };
   }

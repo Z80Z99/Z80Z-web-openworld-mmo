@@ -38,6 +38,7 @@ import { CraftingSystem } from "./CraftingSystem.js";
 import { ShopSystem } from "./ShopSystem.js";
 import { TitleSystem } from "./TitleSystem.js";
 import { IdleSystem } from "./IdleSystem.js";
+import { BattleManager } from "./BattleManager.js";
 
 export const GAME_ROOM_CAPACITY = 100;
 
@@ -76,6 +77,7 @@ export class GameRoom extends Room<RoomState> {
   private shopSystem!: ShopSystem;
   private titleSystem!: TitleSystem;
   private idleSystem!: IdleSystem;
+  private battleManager!: BattleManager;
 
   /** Expose physics system for GameLoop integration. */
   getTilePhysics(): TilePhysics { return this.tilePhysics; }
@@ -148,8 +150,11 @@ export class GameRoom extends Room<RoomState> {
     // Idle / AFK system
     this.idleSystem = new IdleSystem(this.db, this.worldGen);
 
+    // Battle manager (Dynamic Battle Area runtime)
+    this.battleManager = new BattleManager();
+
     // Start game loop
-    this.gameLoop = createGameLoop(this, this.db, this.aoi, this.movementSystem, this.combatSystem, this.encounterSystem, this.mobSpawner);
+    this.gameLoop = createGameLoop(this, this.db, this.aoi, this.movementSystem, this.combatSystem, this.encounterSystem, this.mobSpawner, this.battleManager);
 
     // Set patch rate to match tick rate
     this.setPatchRate(1000 / TICK_RATE);

@@ -1038,3 +1038,146 @@ describe("BattleManager lifecycle invariants", () => {
     expect(battle.playerSide.participants[0].state).toBe("FLEEING");
   });
 });
+
+/* ════════════════ Phase 2A: syncParticipantPosition ════════════════ */
+
+describe("syncParticipantPosition", () => {
+  it("P2A-001 leader position sync updates participant position", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    const result = manager.syncParticipantPosition("p1", point(10, 20));
+    expect(result).toHaveProperty("battle");
+    const battle = (result as { battle: any }).battle;
+    expect(battle.playerSide.participants[0].position).toEqual(point(10, 20));
+  });
+
+  it("P2A-002 leader area follow — center moves with leader", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    manager.syncParticipantPosition("p1", point(10, 20));
+    const battle = manager.getBattle("b1")!;
+    expect(battle.playerSide.area.center).toEqual(point(10, 20));
+  });
+
+  it("P2A-003 member position sync updates position but not area center", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    battleOf(manager.addParticipant("b1", "player", participant("p2", point(1, 1))));
+    const beforeCenter = manager.getBattle("b1")!.playerSide.area.center;
+    manager.syncParticipantPosition("p2", point(50, 50));
+    const battle = manager.getBattle("b1")!;
+    expect(battle.playerSide.participants[1].position).toEqual(point(50, 50));
+    expect(battle.playerSide.area.center).toEqual(beforeCenter);
+  });
+
+  it("P2A-004 non-member rejected with PARTICIPANT_NOT_IN_BATTLE", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    const result = manager.syncParticipantPosition("ghost", point(10, 10));
+    expect(result).toHaveProperty("error", "PARTICIPANT_NOT_IN_BATTLE");
+  });
+
+  it("P2A-005 removed participant rejected", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    battleOf(manager.addParticipant("b1", "player", participant("p2", point(1, 1))));
+    manager.removeParticipant("b1", "p2");
+    const result = manager.syncParticipantPosition("p2", point(10, 10));
+    expect(result).toHaveProperty("error", "PARTICIPANT_NOT_IN_BATTLE");
+  });
+
+  it("P2A-006 removed battle rejected", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(-100, 0)), participant("e1", point(100, 0))));
+    manager.updateBattleArea("b1", "p1", point(-200, 0));
+    manager.updateBattleArea("b1", "e1", point(200, 0));
+    manager.removeBattle("b1");
+    const result = manager.syncParticipantPosition("p1", point(10, 10));
+    expect(result).toHaveProperty("error");
+  });
+
+  it("P2A-007 negative world coordinates accepted", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    manager.syncParticipantPosition("p1", point(-100, -200));
+    const battle = manager.getBattle("b1")!;
+    expect(battle.playerSide.participants[0].position).toEqual(point(-100, -200));
+    expect(battle.playerSide.area.center).toEqual(point(-100, -200));
+  });
+
+  it("P2A-008 cross chunk X — position crosses chunk boundary on X axis", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    manager.syncParticipantPosition("p1", point(33, 0));
+    const battle = manager.getBattle("b1")!;
+    expect(battle.playerSide.participants[0].position).toEqual(point(33, 0));
+    expect(battle.playerSide.area.center).toEqual(point(33, 0));
+  });
+
+  it("P2A-009 cross chunk Y — position crosses chunk boundary on Y axis", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    manager.syncParticipantPosition("p1", point(0, 33));
+    const battle = manager.getBattle("b1")!;
+    expect(battle.playerSide.participants[0].position).toEqual(point(0, 33));
+    expect(battle.playerSide.area.center).toEqual(point(0, 33));
+  });
+
+  it("P2A-010 cross chunk XY — position crosses chunk boundary on both axes", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    manager.syncParticipantPosition("p1", point(33, 33));
+    const battle = manager.getBattle("b1")!;
+    expect(battle.playerSide.participants[0].position).toEqual(point(33, 33));
+    expect(battle.playerSide.area.center).toEqual(point(33, 33));
+  });
+
+  it("P2A-011 repeated sync deterministic — same operations produce same result", () => {
+    const first = new BattleManager();
+    const second = new BattleManager();
+    for (const m of [first, second]) {
+      battleOf(m.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+      m.syncParticipantPosition("p1", point(10, 20));
+      m.syncParticipantPosition("p1", point(30, 40));
+      m.syncParticipantPosition("e1", point(50, 60));
+    }
+    expect(first.getBattle("b1")).toEqual(second.getBattle("b1"));
+  });
+
+  it("P2A-012 leader change then position sync — new leader controls center", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    battleOf(manager.addParticipant("b1", "player", participant("p2", point(10, 10))));
+    manager.transferLeader("b1", "player", "p2");
+    manager.syncParticipantPosition("p2", point(25, 25));
+    const battle = manager.getBattle("b1")!;
+    expect(battle.playerSide.leaderId).toBe("p2");
+    expect(battle.playerSide.area.center).toEqual(point(25, 25));
+  });
+
+  it("P2A-013 new leader controls area center after transfer", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    battleOf(manager.addParticipant("b1", "player", participant("p2", point(10, 10))));
+    manager.transferLeader("b1", "player", "p2");
+    const battle = manager.getBattle("b1")!;
+    expect(battle.playerSide.area.center).toEqual(point(10, 10));
+  });
+
+  it("P2A-014 member movement does not change area center", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    battleOf(manager.addParticipant("b1", "player", participant("p2", point(1, 1))));
+    manager.syncParticipantPosition("p2", point(100, 100));
+    const battle = manager.getBattle("b1")!;
+    expect(battle.playerSide.area.center).toEqual(point(0, 0));
+  });
+
+  it("P2A-015 invalid coordinates rejected with POSITION_NOT_FINITE", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    expect(manager.syncParticipantPosition("p1", { x: NaN, y: 0 })).toHaveProperty("error", "POSITION_NOT_FINITE");
+    expect(manager.syncParticipantPosition("p1", { x: 0, y: Infinity })).toHaveProperty("error", "POSITION_NOT_FINITE");
+    expect(manager.syncParticipantPosition("p1", { x: -Infinity, y: 0 })).toHaveProperty("error", "POSITION_NOT_FINITE");
+  });
+});

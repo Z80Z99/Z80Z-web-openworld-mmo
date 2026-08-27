@@ -7,6 +7,7 @@ import type { MovementCommand } from "./MovementSystem.js";
 import { CombatSystem } from "./CombatSystem.js";
 import { EncounterSystem, MOB_TURN_DELAY_MS } from "./EncounterSystem.js";
 import { MobSpawner } from "./MobSpawner.js";
+import { BattleManager } from "./BattleManager.js";
 
 /**
  * Server-side game loop running at 20 Hz.
@@ -24,6 +25,7 @@ export class GameLoop {
   private combatSystem: CombatSystem;
   private encounterSystem: EncounterSystem;
   private mobSpawner: MobSpawner;
+  private battleManager: BattleManager;
   private lastTickTime: number = 0;
 
   constructor(
@@ -34,6 +36,7 @@ export class GameLoop {
     combatSystem: CombatSystem,
     encounterSystem: EncounterSystem,
     mobSpawner: MobSpawner,
+    battleManager: BattleManager,
   ) {
     this.room = room;
     this.db = db;
@@ -42,6 +45,7 @@ export class GameLoop {
     this.combatSystem = combatSystem;
     this.encounterSystem = encounterSystem;
     this.mobSpawner = mobSpawner;
+    this.battleManager = battleManager;
   }
 
   /**
@@ -63,6 +67,7 @@ export class GameLoop {
     this.lastTickTime = now;
 
     this.processMovement(dt);
+    this.syncBattlePositions();
     this.tickMobAI(dt, now);
     this.tickEncounters(now);
     this.syncMobEntities();
@@ -106,6 +111,29 @@ export class GameLoop {
 
     // Save player positions to database periodically (every 5 seconds)
     this.savePlayerPositions();
+  }
+
+  /**
+   * Phase 2A: Synchronize world entity positions into BattleManager runtime.
+   * Runs after MovementSystem so positions are up-to-date.
+   * Iterates all active battles and syncs participant positions.
+   */
+  private syncBattlePositions(): void {
+    // Sync player positions into battle runtime
+    for (const [sessionId, player] of this.room.state.players.entries()) {
+      const lookup = this.battleManager.getBattleByParticipant(sessionId);
+      if (lookup) {
+        this.battleManager.syncParticipantPosition(sessionId, { x: player.x, y: player.y });
+      }
+    }
+
+    // Sync mob positions into battle runtime
+    for (const [mobId, mob] of this.mobSpawner.getAllMobs()) {
+      const lookup = this.battleManager.getBattleByParticipant(mobId);
+      if (lookup) {
+        this.battleManager.syncParticipantPosition(mobId, { x: mob.x, y: mob.y });
+      }
+    }
   }
 
   /**
@@ -382,8 +410,9 @@ export function createGameLoop(
   combatSystem: CombatSystem,
   encounterSystem: EncounterSystem,
   mobSpawner: MobSpawner,
+  battleManager: BattleManager,
 ): GameLoop {
-  const loop = new GameLoop(room, db, aoi, movementSystem, combatSystem, encounterSystem, mobSpawner);
+  const loop = new GameLoop(room, db, aoi, movementSystem, combatSystem, encounterSystem, mobSpawner, battleManager);
   const tickInterval = 1000 / TICK_RATE;
   room.setSimulationInterval(loop.tick, tickInterval);
   return loop;
