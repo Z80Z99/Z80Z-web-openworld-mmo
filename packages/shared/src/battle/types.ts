@@ -53,7 +53,7 @@ export interface BattleGroup {
 /* ── State / decision unions ── */
 
 /** Lifecycle state of a BattleGroup. */
-export type BattleState = "ACTIVE" | "FLEEING" | "RESOLVED";
+export type BattleState = "ACTIVE" | "FLEEING" | "RESOLVED" | "ELIMINATED";
 
 /** Lifecycle state of an individual participant. */
 export type ParticipantState = "ACTIVE" | "FLEEING" | "ELIMINATED";

@@ -71,3 +71,6 @@ export {
 } from "./world-gen/index.js";
 
 export type { Chunk, WorldGenConfig, LayeredBiomeParams, ShoreTile, ShoreRule, GroundEdgeTile, PathLatticeConfig } from "./world-gen/index.js";
+
+// Dynamic Battle Area (Phase 0 rule layer — standalone, not yet wired into production combat)
+export * from "./battle/index.js";
