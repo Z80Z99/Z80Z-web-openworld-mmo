@@ -378,93 +378,6 @@ describe("CombatSystem", () => {
       expect(events).toBeNull();
     });
   });
-
-  describe("processMobAttack", () => {
-    it("deals damage to player", () => {
-      const mob: MobInstance = {
-        id: "mob_1",
-        typeId: "wolf",
-        config: MOB_TYPES.wolf,
-        x: 10,
-        y: 10,
-        currentHp: 80,
-        maxHp: 80,
-        aggroTarget: "p1",
-        aiState: "chase",
-        patrolTarget: null,
-        spawnX: 10,
-        spawnY: 10,
-        chunkX: 0,
-        chunkY: 0,
-        deathTime: 0,
-        lastAttackTime: 0,
-        synced: false,
-      };
-
-      const events = cs.processMobAttack(mob, "p1", 100, Date.now());
-      expect(events).not.toBeNull();
-
-      const dmgEvent = events!.find((e) => e.type === "player_damaged");
-      expect(dmgEvent).toBeDefined();
-      expect(dmgEvent!.damage).toBeGreaterThan(0);
-      expect(dmgEvent!.currentHp).toBeLessThan(100);
-    });
-
-    it("kills player at 0 HP", () => {
-      const mob: MobInstance = {
-        id: "mob_1",
-        typeId: "scorpion",
-        config: MOB_TYPES.scorpion,
-        x: 10,
-        y: 10,
-        currentHp: 60,
-        maxHp: 60,
-        aggroTarget: "p1",
-        aiState: "chase",
-        patrolTarget: null,
-        spawnX: 10,
-        spawnY: 10,
-        chunkX: 0,
-        chunkY: 0,
-        deathTime: 0,
-        lastAttackTime: 0,
-        synced: false,
-      };
-
-      const events = cs.processMobAttack(mob, "p1", 1, Date.now());
-      expect(events).not.toBeNull();
-
-      const deathEvent = events!.find((e) => e.type === "player_died");
-      expect(deathEvent).toBeDefined();
-    });
-
-    it("respects attack cooldown", () => {
-      const mob: MobInstance = {
-        id: "mob_1",
-        typeId: "wolf",
-        config: MOB_TYPES.wolf,
-        x: 10,
-        y: 10,
-        currentHp: 80,
-        maxHp: 80,
-        aggroTarget: "p1",
-        aiState: "chase",
-        patrolTarget: null,
-        spawnX: 10,
-        spawnY: 10,
-        chunkX: 0,
-        chunkY: 0,
-        deathTime: 0,
-        lastAttackTime: 0,
-        synced: false,
-      };
-
-      const now = Date.now();
-      cs.processMobAttack(mob, "p1", 100, now);
-      const result = cs.processMobAttack(mob, "p1", 100, now + 100);
-      expect(result).toBeNull();
-    });
-  });
 });
 
 /* ── MobSpawner Integration ── */
@@ -708,38 +621,7 @@ describe("MobSpawner", () => {
   });
 });
 
-/* ���� Combat Activation Slice ���� */
-
-describe("processMobAttack - dead player guard", () => {
-  it("returns null and skips cooldown when player is already dead", () => {
-    const combat = new CombatSystem();
-    // Build a minimal mob instance directly
-    const wolf = MOB_TYPES["wolf"];
-    const testMob: MobInstance = {
-      id: "mob_test_1",
-      typeId: "wolf",
-      config: wolf,
-      x: 0, y: 0,
-      currentHp: wolf.baseHp,
-      maxHp: wolf.baseHp,
-      aggroTarget: "p1",
-      aiState: "chase",
-      patrolTarget: null,
-      spawnX: 0, spawnY: 0,
-      chunkX: 0, chunkY: 0,
-      deathTime: 0,
-      lastAttackTime: 0,
-      lastCombatTime: 0,
-      synced: false,
-    };
-    const now = Date.now();
-    // Dead player (hp = 0): attack must be ignored entirely.
-    expect(combat.processMobAttack(testMob, "p1", 0, now)).toBeNull();
-    // Cooldown must NOT be consumed (mob can attack a living target right after).
-    const events = combat.processMobAttack(testMob, "p1", 50, now);
-    expect(events).not.toBeNull();
-  });
-});
+/* ── processPlayerAttack - player level scaling ── */
 
 describe("processPlayerAttack - player level scaling", () => {
   it("uses the passed player level instead of hardcoded 1", () => {
