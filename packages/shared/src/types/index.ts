@@ -15,6 +15,7 @@ export type {
   CraftRequest,
   MountAction,
   AttackMessage,
+  EncounterActionMessage,
   CombatEventPayload,
   ClientMessage,
 } from "./messages.js";

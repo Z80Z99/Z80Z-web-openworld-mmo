@@ -56,13 +56,29 @@ export interface EncounterActionMessage {
   action: "attack" | "defend" | "flee";
 }
 
+/** All combat event type names the server currently emits. */
+export type CombatEventType =
+  | "damage_dealt"
+  | "mob_killed"
+  | "player_damaged"
+  | "player_died"
+  | "xp_gained"
+  | "loot_dropped"
+  | "player_respawn"
+  | "level_up"
+  | "mob_respawn"
+  | "encounter_started"
+  | "defend"
+  | "encounter_fled"
+  | "encounter_timeout";
+
 /**
  * Unified server→client combat event payload.
- * `type` is one of: damage_dealt | mob_killed | player_damaged | player_died |
- * xp_gained | loot_dropped | player_respawn | level_up | mob_respawn
+ * `type` is one of the CombatEventType literals; fields are optional
+ * because each event variant carries a different subset.
  */
 export interface CombatEventPayload {
-  type: string;
+  type: CombatEventType;
   sourceId: string;
   targetId: string;
   damage?: number;
@@ -74,6 +90,16 @@ export interface CombatEventPayload {
   level?: number;
   attack?: number;
   defense?: number;
+  /** encounter_started: the mob involved. */
+  mobId?: string;
+  mobHp?: number;
+  mobMaxHp?: number;
+  playerHp?: number;
+  playerMaxHp?: number;
+  /** Terminal encounter events (victory/fled/player_died/timeout). */
+  reason?: string;
+  /** Current encounter round. */
+  round?: number;
 }
 
 /** Union of all client-to-server message types */
