@@ -1370,3 +1370,257 @@ describe("removeParticipantByDeath", () => {
     expect(battle.playerSide.leaderId).toBeNull();
   });
 });
+
+/* ─────────────────────────────────────────────────────────────
+   Phase 2C: Battle Disengagement — evaluateBattleDisengagement
+   ───────────────────────────────────────────────────────────── */
+
+/**
+ * Shared geometry constants for Phase 2C tests.
+ *
+ * calculateBattleAreaRadius(1, DEFAULT) ≈ 13.309  (1v1)
+ * calculateBattleAreaRadius(3, DEFAULT) ≈ 20.662  (3v1)
+ *
+ * Layout for isolated FLEEING tests (asymmetric 3v1):
+ *   Player leader at (-5, 0), enemy at (10, 0)
+ *   Player area: center (-5,0), radius ~20.662
+ *   Enemy area:  center (10,0), radius ~13.309
+ *   → Player outside enemy area (dist 15 > 13.309)
+ *   → Enemy still inside player area (dist 15 < 20.662)
+ */
+describe("Phase 2C: evaluateBattleDisengagement", () => {
+  /** Create a battle and add two extra players to make the player area larger (radius ~20.66). */
+  function createAsymmetricBattle(manager: BattleManager): BattleGroup {
+    const battle = createBattle(manager, {
+      player: participant("p1", point(-5, 0)),
+      enemy: participant("e1", point(10, 0)),
+    });
+    battleOf(manager.addParticipant(battle.id, "player", participant("p2", point(-4, 1))));
+    battleOf(manager.addParticipant(battle.id, "player", participant("p3", point(-6, -1))));
+    const result = manager.getBattle(battle.id);
+    expect(result).toBeDefined();
+    return result!;
+  }
+
+  it("P2C-001: player leader outside enemy area → playerSide FLEEING", () => {
+    const manager = new BattleManager();
+    createAsymmetricBattle(manager);
+    // p1 at (-5,0), enemy area center (10,0), radius ~13.309. dist=15 > 13.309 → outside
+    manager.evaluateBattleDisengagement();
+    const battle = manager.getBattle("battle")!;
+    expect(battle.playerSide.state).toBe("FLEEING");
+    // Enemy leader at (10,0), player area center (-5,0), radius ~20.66. dist=15 < 20.66 → inside
+    expect(battle.enemySide.state).toBe("ACTIVE");
+  });
+
+  it("P2C-002: FLEEING leader re-enters enemy area → ACTIVE (rejoin)", () => {
+    const manager = new BattleManager();
+    createAsymmetricBattle(manager);
+    // First tick: flee
+    manager.evaluateBattleDisengagement();
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("FLEEING");
+
+    // Move p1 back inside enemy area: dist from (0,0) to enemy area center (10,0) = 10 < 13.309
+    battleOf(manager.syncParticipantPosition("p1", point(0, 0)));
+    manager.evaluateBattleDisengagement();
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("ACTIVE");
+  });
+
+  it("P2C-003: both leaders outside opposing areas → RESOLVED", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("p1", point(0, 0)),
+      enemy: participant("e1", point(30, 0)),
+    });
+    // 1v1: both areas radius ~13.309. dist=30 > 13.309 for both.
+    manager.evaluateBattleDisengagement();
+    const battle = manager.getBattle("battle")!;
+    expect(battle.playerSide.state).toBe("RESOLVED");
+    expect(battle.enemySide.state).toBe("RESOLVED");
+  });
+
+  it("P2C-004: RESOLVED state is terminal — repeated evaluation is idempotent", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("p1", point(0, 0)),
+      enemy: participant("e1", point(30, 0)),
+    });
+    manager.evaluateBattleDisengagement();
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("RESOLVED");
+    // Second call — still RESOLVED
+    manager.evaluateBattleDisengagement();
+    const battle = manager.getBattle("battle")!;
+    expect(battle.playerSide.state).toBe("RESOLVED");
+    expect(battle.enemySide.state).toBe("RESOLVED");
+  });
+
+  it("P2C-005: active leaders inside enemy areas → stays ACTIVE (no flee)", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("p1", point(0, 0)),
+      enemy: participant("e1", point(10, 0)),
+    });
+    // 1v1: dist=10 < 13.309 → both inside
+    manager.evaluateBattleDisengagement();
+    const battle = manager.getBattle("battle")!;
+    expect(battle.playerSide.state).toBe("ACTIVE");
+    expect(battle.enemySide.state).toBe("ACTIVE");
+  });
+
+  it("P2C-006: FLEEING leader stays outside → stays FLEEING (no rejoin)", () => {
+    const manager = new BattleManager();
+    createAsymmetricBattle(manager);
+    manager.evaluateBattleDisengagement();
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("FLEEING");
+    // Second call — p1 still at (-5,0), outside enemy area
+    manager.evaluateBattleDisengagement();
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("FLEEING");
+  });
+
+  it("P2C-007: only player outside, enemy inside player area → player FLEEING, enemy ACTIVE", () => {
+    const manager = new BattleManager();
+    createAsymmetricBattle(manager);
+    manager.evaluateBattleDisengagement();
+    const battle = manager.getBattle("battle")!;
+    expect(battle.playerSide.state).toBe("FLEEING");
+    expect(battle.enemySide.state).toBe("ACTIVE");
+  });
+
+  it("P2C-008: ELIMINATED side is skipped", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("p1", point(0, 0)),
+      enemy: participant("e1", point(30, 0)),
+    });
+    // Kill the player side
+    manager.removeParticipantByDeath("p1");
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("ELIMINATED");
+    // Disengagement — ELIMINATED side should be skipped without error
+    manager.evaluateBattleDisengagement();
+    const battle = manager.getBattle("battle")!;
+    expect(battle.playerSide.state).toBe("ELIMINATED");
+    expect(battle.enemySide.state).toBe("RESOLVED");
+  });
+
+  it("P2C-009: side with no leader (leaderId null) is skipped", () => {
+    const manager = new BattleManager();
+    createAsymmetricBattle(manager);
+    // Kill the only enemy → enemy side ELIMINATED, leaderId null
+    manager.removeParticipantByDeath("e1");
+    // Disengagement should not throw
+    manager.evaluateBattleDisengagement();
+    const battle = manager.getBattle("battle")!;
+    expect(battle.enemySide.state).toBe("ELIMINATED");
+    expect(battle.enemySide.leaderId).toBeNull();
+  });
+
+  it("P2C-010: idempotent — calling twice produces identical state", () => {
+    const manager = new BattleManager();
+    createAsymmetricBattle(manager);
+    manager.evaluateBattleDisengagement();
+    const first = { ...manager.getBattle("battle")!.playerSide, area: { ...manager.getBattle("battle")!.playerSide.area } };
+    manager.evaluateBattleDisengagement();
+    const second = manager.getBattle("battle")!.playerSide;
+    expect(second.state).toBe(first.state);
+    expect(second.leaderId).toBe(first.leaderId);
+    expect(second.participants.length).toBe(first.participants.length);
+  });
+
+  it("P2C-011: addParticipant blocked on RESOLVED side", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("p1", point(0, 0)),
+      enemy: participant("e1", point(30, 0)),
+    });
+    manager.evaluateBattleDisengagement();
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("RESOLVED");
+    const result = manager.addParticipant("battle", "player", participant("p4", point(5, 0)));
+    expectError(result, "PARTICIPANT_NOT_ON_SIDE");
+  });
+
+  it("P2C-012: enemy side also flees when outside player area (symmetric flee)", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("p1", point(0, 0)),
+      enemy: participant("e1", point(30, 0)),
+    });
+    // 1v1: both outside → both should FLEE, then RESOLVE
+    manager.evaluateBattleDisengagement();
+    const battle = manager.getBattle("battle")!;
+    expect(battle.playerSide.state).toBe("RESOLVED");
+    expect(battle.enemySide.state).toBe("RESOLVED");
+  });
+
+  it("P2C-013: both sides flee independently, then resolve in same tick", () => {
+    const manager = new BattleManager();
+    // Asymmetric but with both outside: 3 players far, 1 enemy far
+    const battle = createBattle(manager, {
+      player: participant("p1", point(0, 0)),
+      enemy: participant("e1", point(50, 0)),
+    });
+    battleOf(manager.addParticipant(battle.id, "player", participant("p2", point(1, 1))));
+    battleOf(manager.addParticipant(battle.id, "player", participant("p3", point(-1, -1))));
+    // p1 at (0,0), enemy area center (50,0), dist=50 > 13.309 → outside
+    // e1 at (50,0), player area center (0,0), radius ~20.66, dist=50 > 20.66 → outside
+    manager.evaluateBattleDisengagement();
+    const result = manager.getBattle("battle")!;
+    expect(result.playerSide.state).toBe("RESOLVED");
+    expect(result.enemySide.state).toBe("RESOLVED");
+  });
+
+  it("P2C-014: rejoin has priority — FLEEING leader inside enemy area → ACTIVE", () => {
+    const manager = new BattleManager();
+    createAsymmetricBattle(manager);
+    // Flee first
+    manager.evaluateBattleDisengagement();
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("FLEEING");
+    // Move p1 back inside: (0,0) to enemy area center (10,0) = 10 < 13.309
+    battleOf(manager.syncParticipantPosition("p1", point(0, 0)));
+    manager.evaluateBattleDisengagement();
+    // shouldRejoin fires first → ACTIVE
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("ACTIVE");
+  });
+
+  it("P2C-015: leader death → leader reselected, disengagement evaluates new leader", () => {
+    const manager = new BattleManager();
+    // 3v1: p1 at (-5,0) is leader, p2 at (-4,1), p3 at (-6,-1)
+    createAsymmetricBattle(manager);
+    // Kill the leader p1
+    manager.removeParticipantByDeath("p1");
+    const battle = manager.getBattle("battle")!;
+    expect(battle.playerSide.leaderId).toBe("p2");
+    expect(battle.playerSide.state).toBe("ACTIVE");
+    // p2 at (-4,1), enemy area center (10,0), radius ~13.309. dist ≈ 14.04 > 13.309 → outside
+    manager.evaluateBattleDisengagement();
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("FLEEING");
+  });
+
+  it("P2C-016: multiple participants, leader change affects disengagement geometry", () => {
+    const manager = new BattleManager();
+    // 3v1 battle with all players near enemy → engaged
+    const battle = createBattle(manager, {
+      player: participant("p1", point(8, 0)),
+      enemy: participant("e1", point(10, 0)),
+    });
+    battleOf(manager.addParticipant(battle.id, "player", participant("p2", point(9, 1))));
+    battleOf(manager.addParticipant(battle.id, "player", participant("p3", point(7, -1))));
+    // All inside: dist(8,10)=2 < 13.309. Both active.
+    manager.evaluateBattleDisengagement();
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("ACTIVE");
+
+    // Move p1 (leader) far away via syncParticipantPosition
+    // This moves the player area center to p1's new position
+    battleOf(manager.syncParticipantPosition("p1", point(-5, 0)));
+    // Player area center now (-5,0), radius ~20.66
+    // p1 at (-5,0), enemy area center (10,0), dist=15 > 13.309 → outside → flee
+    // e1 at (10,0), player area center (-5,0), dist=15 < 20.66 → inside → no resolve
+    manager.evaluateBattleDisengagement();
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("FLEEING");
+
+    // Move p1 back inside enemy area
+    battleOf(manager.syncParticipantPosition("p1", point(5, 0)));
+    // p1 at (5,0), enemy area center (10,0), dist=5 < 13.309 → inside → rejoin
+    manager.evaluateBattleDisengagement();
+    expect(manager.getBattle("battle")!.playerSide.state).toBe("ACTIVE");
+  });
+});

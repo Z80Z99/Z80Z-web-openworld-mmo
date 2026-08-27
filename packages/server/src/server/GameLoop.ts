@@ -69,6 +69,7 @@ export class GameLoop {
     this.processMovement(dt);
     this.syncBattlePositions();
     this.evaluateDynamicBattleMembership();
+    this.evaluateBattleDisengagement();
     this.tickMobAI(dt, now);
     this.tickEncounters(now);
     this.syncMobEntities();
@@ -174,6 +175,14 @@ export class GameLoop {
         entityType: "mob",
       });
     }
+  }
+
+  /**
+   * Phase 2C: Evaluate battle disengagement — flee, rejoin, resolve.
+   * Runs after position sync and dynamic membership, before mob AI.
+   */
+  private evaluateBattleDisengagement(): void {
+    this.battleManager.evaluateBattleDisengagement();
   }
 
   /**

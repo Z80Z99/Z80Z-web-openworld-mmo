@@ -4,6 +4,8 @@ import {
   calculateBattleAreaRadius,
   selectNewLeader,
   shouldResolveBattle,
+  shouldEnterFleeing,
+  shouldRejoin,
   canJoinBattleSide,
   isPointInsideBattleArea,
 } from "@mmo/shared/dist/battle/rules.js";
@@ -232,6 +234,7 @@ export class BattleManager {
     if (existing) return { error: "PARTICIPANT_ALREADY_IN_BATTLE" };
     if (participant.state === "ELIMINATED") return { error: "PARTICIPANT_DEAD" };
     if (side.state === "ELIMINATED") return { error: "PARTICIPANT_NOT_ON_SIDE" };
+    if (side.state === "RESOLVED") return { error: "PARTICIPANT_NOT_ON_SIDE" };
 
     side.participants.push(toMutableParticipant(participant));
     this.participantIndex.set(participant.id, { battleId, sideId });
@@ -493,6 +496,81 @@ export class BattleManager {
     const entry = this.participantIndex.get(participantId);
     if (!entry) return { error: "PARTICIPANT_NOT_IN_BATTLE" };
     return this.removeParticipant(entry.battleId, participantId);
+  }
+
+  /**
+   * Phase 2C: Evaluate disengagement state for all active battles.
+   *
+   * For each battle, evaluates both sides against the opposing area:
+   *   - ACTIVE  → FLEEING  when leader leaves enemy area
+   *   - FLEEING → ACTIVE   when leader re-enters enemy area
+   *   - Both sides RESOLVED when both leaders are outside opposing areas
+   *
+   * RESOLVED and ELIMINATED sides are skipped (terminal states).
+   * Must be idempotent — repeated calls produce identical state.
+   */
+  evaluateBattleDisengagement(): void {
+    for (const [, battle] of this.battles) {
+      this.evaluateSideDisengagement(battle, battle.playerSide, battle.enemySide);
+      this.evaluateSideDisengagement(battle, battle.enemySide, battle.playerSide);
+      this.evaluateResolution(battle);
+    }
+  }
+
+  /**
+   * Evaluate flee/rejoin for a single side against the opposing area.
+   * Terminal states (RESOLVED, ELIMINATED) are skipped.
+   */
+  private evaluateSideDisengagement(
+    battle: MutableBattleGroup,
+    side: MutableSide,
+    opposingSide: MutableSide,
+  ): void {
+    if (side.state === "RESOLVED" || side.state === "ELIMINATED") return;
+    if (opposingSide.state === "ELIMINATED") return;
+    const leader = getLeader(side);
+    if (!leader) return;
+
+    // Check rejoin first (FLEEING → ACTIVE)
+    if (shouldRejoin({ leader: toSnapshotParticipant(leader), enemyArea: opposingSide.area })) {
+      if (side.state === "FLEEING") {
+        side.state = "ACTIVE";
+        leader.state = "ACTIVE";
+      }
+      return;
+    }
+    // Check flee (ACTIVE → FLEEING)
+    if (shouldEnterFleeing({ leader: toSnapshotParticipant(leader), enemyArea: opposingSide.area })) {
+      if (side.state === "ACTIVE") {
+        side.state = "FLEEING";
+        leader.state = "FLEEING";
+      }
+    }
+  }
+
+  /**
+   * Evaluate whether both sides have disengaged → RESOLVED.
+   * Once RESOLVED, the state is terminal and cannot be undone.
+   * ELIMINATED sides are preserved — they lost the battle, not disengaged.
+   */
+  private evaluateResolution(battle: MutableBattleGroup): void {
+    if (battle.playerSide.state === "RESOLVED" && battle.enemySide.state === "RESOLVED") return;
+
+    const firstLeader = getLeader(battle.playerSide);
+    const secondLeader = getLeader(battle.enemySide);
+    if (shouldResolveBattle({
+      firstLeader: firstLeader ? toSnapshotParticipant(firstLeader) : null,
+      secondLeader: secondLeader ? toSnapshotParticipant(secondLeader) : null,
+      firstEnemyArea: battle.playerSide.area,
+      secondEnemyArea: battle.enemySide.area,
+    })) {
+      if (battle.playerSide.state !== "ELIMINATED" && battle.playerSide.state !== "RESOLVED") {
+        battle.playerSide.state = "RESOLVED";
+      }
+      if (battle.enemySide.state !== "ELIMINATED" && battle.enemySide.state !== "RESOLVED") {
+        battle.enemySide.state = "RESOLVED";
+      }
+    }
   }
 
 }
