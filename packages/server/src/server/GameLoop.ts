@@ -68,6 +68,7 @@ export class GameLoop {
 
     this.processMovement(dt);
     this.syncBattlePositions();
+    this.evaluateDynamicBattleMembership();
     this.tickMobAI(dt, now);
     this.tickEncounters(now);
     this.syncMobEntities();
@@ -133,6 +134,45 @@ export class GameLoop {
       if (lookup) {
         this.battleManager.syncParticipantPosition(mobId, { x: mob.x, y: mob.y });
       }
+    }
+  }
+
+  /**
+   * Phase 2B: Evaluate whether any world entity should dynamically join
+   * an active battle. Runs after position sync so coordinates are fresh.
+   *
+   * For each player and mob NOT already in a battle, builds a candidate
+   * descriptor and calls `battleManager.evaluateDynamicJoin()`.
+   * The join decision is side-effect-free for the caller — failures are
+   * silently ignored (the entity simply isn't in range).
+   */
+  private evaluateDynamicBattleMembership(): void {
+    // Players — join the "player" side
+    for (const [sessionId, player] of this.room.state.players.entries()) {
+      const existing = this.battleManager.getBattleByParticipant(sessionId);
+      if (existing) continue;
+
+      this.battleManager.evaluateDynamicJoin({
+        id: sessionId,
+        position: { x: player.x, y: player.y },
+        state: player.health > 0 ? "ACTIVE" : "ELIMINATED",
+        entityType: "player",
+      });
+    }
+
+    // Mobs — join the "enemy" side
+    for (const [mobId, mob] of this.mobSpawner.getAllMobs()) {
+      const existing = this.battleManager.getBattleByParticipant(mobId);
+      if (existing) continue;
+
+      if (mob.aiState === "dead") continue;
+
+      this.battleManager.evaluateDynamicJoin({
+        id: mobId,
+        position: { x: mob.x, y: mob.y },
+        state: "ACTIVE",
+        entityType: "mob",
+      });
     }
   }
 
@@ -302,6 +342,7 @@ export class GameLoop {
         const client = this.room.clients.getById(enc.playerId);
         if (result.reason === "player_died") {
           player.health = 0;
+          this.battleManager.removeParticipantByDeath(enc.playerId);
           client?.send("combat_event", { type: "player_died", sourceId: mob.id, targetId: enc.playerId });
           setTimeout(() => {
             const respawning = this.room.state.players.get(enc.playerId);

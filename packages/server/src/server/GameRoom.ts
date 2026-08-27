@@ -118,6 +118,8 @@ export class GameRoom extends Room<RoomState> {
     // Mob spawner — when AOI pruning removes a mob, release any encounter
     // referencing it so the player's busy/combat state can never dangle.
     this.mobSpawner = new MobSpawner(this.worldGen, (mobId) => {
+      // Remove mob from any active battle
+      this.battleManager.removeParticipantByDeath(mobId);
       const releasedPlayer = this.encounterSystem.endEncounterForMob(mobId);
       if (releasedPlayer) {
         const client = this.clients.getById(releasedPlayer);
@@ -339,6 +341,9 @@ export class GameRoom extends Room<RoomState> {
 
     // Remove combat stats
     this.combatSystem.removePlayerStats(client.sessionId);
+
+    // Remove from any active battle
+    this.battleManager.removeParticipantByDeath(client.sessionId);
 
     // End any active encounter and release the mob
     if (this.encounterSystem.hasEncounter(client.sessionId)) {
@@ -870,6 +875,7 @@ export class GameRoom extends Room<RoomState> {
 
           if (result.reason === "player_died") {
             player.health = 0;
+            this.battleManager.removeParticipantByDeath(client.sessionId);
             setTimeout(() => {
               const respawning = this.state.players.get(client.sessionId);
               if (!respawning) return;

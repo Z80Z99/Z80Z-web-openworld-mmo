@@ -1181,3 +1181,192 @@ describe("syncParticipantPosition", () => {
     expect(manager.syncParticipantPosition("p1", { x: -Infinity, y: 0 })).toHaveProperty("error", "POSITION_NOT_FINITE");
   });
 });
+
+/* ════════════════ Phase 2B — Dynamic join ════════════════ */
+
+describe("evaluateDynamicJoin", () => {
+  function candidate(
+    id: string,
+    x: number,
+    y: number,
+    entityType: "player" | "mob" = "player",
+    state: ParticipantState = "ACTIVE",
+  ) {
+    return { id, position: point(x, y), state, entityType };
+  }
+
+  it("B1: active player inside player-side area joins", () => {
+    const manager = new BattleManager();
+    // Leader at (0,0), enemy at (10,0). Player-side area center=(0,0), radius=baseRadius=8.
+    createBattle(manager, {
+      player: participant("leader", point(0, 0)),
+      enemy: participant("enemy-1", point(10, 0)),
+    });
+    const result = manager.evaluateDynamicJoin(candidate("p2", 2, 2, "player"));
+    expect(result).toHaveProperty("battle");
+    const battle = (result as { battle: BattleGroup }).battle;
+    expect(battle.playerSide.participants).toHaveLength(2);
+    expect(battle.playerSide.participants.map(p => p.id)).toContain("p2");
+  });
+
+  it("B2: active mob inside player-side area rejected with CANDIDATE_WRONG_FACTION", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("leader", point(0, 0)),
+      enemy: participant("enemy-1", point(10, 0)),
+    });
+    // Mob at (-5,0) is inside player-side area (center=(0,0), radius≈13.3) but
+    // far outside enemy-side area (center=(10,0), radius≈13.3).
+    // mob→player is illegal faction, so CANDIDATE_WRONG_FACTION.
+    expectError(manager.evaluateDynamicJoin(candidate("mob1", -5, 0, "mob")), "CANDIDATE_WRONG_FACTION");
+  });
+
+  it("B3: active player outside all battle areas rejected with CANDIDATE_OUT_OF_RANGE", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("leader", point(0, 0)),
+      enemy: participant("enemy-1", point(10, 0)),
+    });
+    // (50,50) is far outside both areas (radius ~= 8).
+    expectError(manager.evaluateDynamicJoin(candidate("p2", 50, 50, "player")), "CANDIDATE_OUT_OF_RANGE");
+  });
+
+  it("B4: eliminated candidate rejected with CANDIDATE_NOT_ALIVE", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("leader", point(0, 0)),
+      enemy: participant("enemy-1", point(10, 0)),
+    });
+    expectError(
+      manager.evaluateDynamicJoin(candidate("p2", 2, 2, "player", "ELIMINATED")),
+      "CANDIDATE_NOT_ALIVE",
+    );
+  });
+
+  it("B5: candidate already in a battle rejected with PARTICIPANT_ALREADY_IN_BATTLE", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("leader", point(0, 0)),
+      enemy: participant("enemy-1", point(10, 0)),
+    });
+    const result = manager.evaluateDynamicJoin(candidate("p2", 2, 2, "player"));
+    expect(result).toHaveProperty("battle");
+    // p2 is now in battle — try again.
+    expectError(manager.evaluateDynamicJoin(candidate("p2", 2, 2, "player")), "PARTICIPANT_ALREADY_IN_BATTLE");
+  });
+
+  it("B6: no active battles returns NO_VALID_BATTLE", () => {
+    const manager = new BattleManager();
+    expectError(manager.evaluateDynamicJoin(candidate("p1", 0, 0, "player")), "NO_VALID_BATTLE");
+  });
+
+  it("B7: mob inside enemy-side area joins enemy side", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("leader", point(0, 0)),
+      enemy: participant("enemy-1", point(10, 0)),
+    });
+    // enemy-side area center=(10,0), radius=8. mob at (11,1) is inside.
+    const result = manager.evaluateDynamicJoin(candidate("mob1", 11, 1, "mob"));
+    expect(result).toHaveProperty("battle");
+    const battle = (result as { battle: BattleGroup }).battle;
+    expect(battle.enemySide.participants).toHaveLength(2);
+    expect(battle.enemySide.participants.map(p => p.id)).toContain("mob1");
+  });
+
+  it("B8: player joins player side → radius recalculates (increases)", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("leader", point(0, 0)),
+      enemy: participant("enemy-1", point(10, 0)),
+    });
+    const before = manager.getBattle("battle")!.playerSide.area.radius;
+    manager.evaluateDynamicJoin(candidate("p2", 2, 2, "player"));
+    const after = manager.getBattle("battle")!.playerSide.area.radius;
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it("B9: mob joins enemy side → radius recalculates (increases)", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("leader", point(0, 0)),
+      enemy: participant("enemy-1", point(10, 0)),
+    });
+    const before = manager.getBattle("battle")!.enemySide.area.radius;
+    manager.evaluateDynamicJoin(candidate("mob1", 11, 1, "mob"));
+    const after = manager.getBattle("battle")!.enemySide.area.radius;
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it("B10: candidate exactly on boundary joins", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("leader", point(0, 0)),
+      enemy: participant("enemy-1", point(10, 0)),
+    });
+    // baseRadius = 8. Point at (8, 0) is exactly on boundary of player area.
+    const result = manager.evaluateDynamicJoin(candidate("p2", 8, 0, "player"));
+    expect(result).toHaveProperty("battle");
+  });
+
+  it("B11: fleeing candidate does not join", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("leader", point(0, 0)),
+      enemy: participant("enemy-1", point(10, 0)),
+    });
+    expectError(
+      manager.evaluateDynamicJoin(candidate("p2", 2, 2, "player", "FLEEING")),
+      "CANDIDATE_NOT_ALIVE",
+    );
+  });
+});
+
+/* ════════════════ Phase 2B — removeParticipantByDeath ════════════════ */
+
+describe("removeParticipantByDeath", () => {
+  it("D1: remove participant in battle → success + radius shrinks", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("p1", point(0, 0)),
+      enemy: participant("e1", point(10, 0)),
+    });
+    battleOf(manager.addParticipant("battle", "player", participant("p2", point(2, 2))));
+    const before = manager.getBattle("battle")!.playerSide.area.radius;
+    const result = manager.removeParticipantByDeath("p2");
+    expect(result).toHaveProperty("battle");
+    const after = (result as { battle: BattleGroup }).battle;
+    expect(after.playerSide.participants.map(p => p.id)).not.toContain("p2");
+    expect(after.playerSide.area.radius).toBeLessThan(before);
+  });
+
+  it("D2: remove participant not in any battle → PARTICIPANT_NOT_IN_BATTLE", () => {
+    const manager = new BattleManager();
+    expectError(manager.removeParticipantByDeath("ghost"), "PARTICIPANT_NOT_IN_BATTLE");
+  });
+
+  it("D3: remove leader → leader reselected from remaining", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("p1", point(0, 0)),
+      enemy: participant("e1", point(10, 0)),
+    });
+    battleOf(manager.addParticipant("battle", "player", participant("p2", point(2, 2))));
+    const result = manager.removeParticipantByDeath("p1");
+    const battle = (result as { battle: BattleGroup }).battle;
+    expect(battle.playerSide.leaderId).toBe("p2");
+    expect(battle.playerSide.leaderId).not.toBe("p1");
+  });
+
+  it("D4: remove last participant on side → side ELIMINATED", () => {
+    const manager = new BattleManager();
+    createBattle(manager, {
+      player: participant("p1", point(0, 0)),
+      enemy: participant("e1", point(10, 0)),
+    });
+    const result = manager.removeParticipantByDeath("p1");
+    const battle = (result as { battle: BattleGroup }).battle;
+    expect(battle.playerSide.state).toBe("ELIMINATED");
+    expect(battle.playerSide.leaderId).toBeNull();
+  });
+});

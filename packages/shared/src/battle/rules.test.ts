@@ -9,6 +9,7 @@ import {
   shouldRejoin,
   shouldResolveBattle,
   selectNewLeader,
+  canJoinBattleSide,
 } from "./rules.js";
 import { DEFAULT_BATTLE_RULES_CONFIG } from "./constants.js";
 import type {
@@ -514,5 +515,30 @@ describe("calculateBattleAreaRadius edge cases", () => {
     expect(() =>
       calculateBattleAreaRadius(1, { baseRadius: 10, maxRadius: 5, expansionRate: 1, diminishingReturnScale: 1 }),
     ).toThrow(RangeError);
+  });
+});
+
+/* ════════════════ Faction gate (Phase 2B) ════════════════ */
+
+describe("canJoinBattleSide", () => {
+  it("S1: player can join player side", () => {
+    expect(canJoinBattleSide("player", "player")).toBe(true);
+  });
+
+  it("S2: player cannot join enemy side", () => {
+    expect(canJoinBattleSide("player", "enemy")).toBe(false);
+  });
+
+  it("S3: mob can join enemy side", () => {
+    expect(canJoinBattleSide("mob", "enemy")).toBe(true);
+  });
+
+  it("S4: mob cannot join player side", () => {
+    expect(canJoinBattleSide("mob", "player")).toBe(false);
+  });
+
+  it("S5: unknown side identifier returns false", () => {
+    expect(canJoinBattleSide("player", "ally")).toBe(false);
+    expect(canJoinBattleSide("mob", "boss")).toBe(false);
   });
 });

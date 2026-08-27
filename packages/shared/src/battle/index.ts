@@ -1,4 +1,16 @@
 export { DEFAULT_BATTLE_RULES_CONFIG } from "./constants.js";
+export {
+  distanceSquared,
+  isPointInsideBattleArea,
+  calculateBattleAreaRadius,
+  shouldJoinBattle,
+  decideEngagement,
+  shouldEnterFleeing,
+  shouldRejoin,
+  shouldResolveBattle,
+  selectNewLeader,
+  canJoinBattleSide,
+} from "./rules.js";
 
 export type {
   CombatPoint,

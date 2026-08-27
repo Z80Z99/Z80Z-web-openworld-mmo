@@ -91,6 +91,27 @@ export function calculateBattleAreaRadius(
   return Math.min(config.maxRadius, expanded);
 }
 
+/* ── Faction gate ── */
+
+/**
+ * Static entity-type → side membership gate.
+ *
+ * In the current PvE-only design there is no dynamic faction system:
+ *   - players may only join the "player" side
+ *   - mobs may only join the "enemy" side
+ *
+ * Returns `false` for any unknown side identifier. This is a pure
+ * predicate with no side effects.
+ */
+export function canJoinBattleSide(
+  entityType: "player" | "mob",
+  sideId: string,
+): boolean {
+  if (entityType === "player" && sideId === "player") return true;
+  if (entityType === "mob" && sideId === "enemy") return true;
+  return false;
+}
+
 /* ── Joining ── */
 
 /**

@@ -4,6 +4,8 @@ import {
   calculateBattleAreaRadius,
   selectNewLeader,
   shouldResolveBattle,
+  canJoinBattleSide,
+  isPointInsideBattleArea,
 } from "@mmo/shared/dist/battle/rules.js";
 import type {
   BattleGroup,
@@ -30,7 +32,11 @@ export type BattleManagerError =
   | "PARTICIPANT_NOT_ON_SIDE"
   | "LEADER_NOT_ON_SIDE"
   | "BATTLE_NOT_RESOLVED"
-  | "POSITION_NOT_FINITE";
+  | "POSITION_NOT_FINITE"
+  | "CANDIDATE_NOT_ALIVE"
+  | "CANDIDATE_WRONG_FACTION"
+  | "CANDIDATE_OUT_OF_RANGE"
+  | "NO_VALID_BATTLE";
 
 type MutableParticipant = {
   id: string;
@@ -414,6 +420,79 @@ export class BattleManager {
     side.leaderId = selected.id;
     side.state = "ACTIVE";
     side.area.center = copyPoint(selected.position);
+  }
+
+  /**
+   * Evaluate whether a candidate should dynamically join an active battle.
+   *
+   * Iterates all active battles and checks:
+   *   1. Candidate is alive (state === "ACTIVE")
+   *   2. Candidate is not already in any battle
+   *   3. Candidate's position is inside a valid battle area
+   *   4. Candidate's entity type is legally allowed on that side (faction gate)
+   *
+   * On the first valid match the candidate joins via `addParticipant()`.
+   * Returns `NO_VALID_BATTLE` when no battle area contains the candidate.
+   */
+  evaluateDynamicJoin(candidate: {
+    id: string;
+    position: CombatPoint;
+    state: ParticipantState;
+    entityType: "player" | "mob";
+  }): BattleResult {
+    if (candidate.state !== "ACTIVE") {
+      return { error: "CANDIDATE_NOT_ALIVE" };
+    }
+    if (this.participantIndex.has(candidate.id)) {
+      return { error: "PARTICIPANT_ALREADY_IN_BATTLE" };
+    }
+    if (this.battles.size === 0) {
+      return { error: "NO_VALID_BATTLE" };
+    }
+
+    let insideAnyArea = false;
+
+    for (const [, battle] of this.battles) {
+      for (const sideId of ["player", "enemy"] as const) {
+        const side = this.getSide(battle, sideId);
+        if (!side || side.state === "ELIMINATED") continue;
+
+        const isLegalFaction = canJoinBattleSide(candidate.entityType, sideId);
+        const isInside = isPointInsideBattleArea(candidate.position, side.area);
+
+        if (!isLegalFaction) {
+          if (isInside) insideAnyArea = true;
+          continue;
+        }
+        if (!isInside) continue;
+
+        const snapshotParticipant: BattleParticipant = {
+          id: candidate.id,
+          position: copyPoint(candidate.position),
+          combatPower: 10,
+          personality: "cautious",
+          state: candidate.state,
+        };
+        return this.addParticipant(battle.id, sideId, snapshotParticipant);
+      }
+    }
+
+    if (insideAnyArea) return { error: "CANDIDATE_WRONG_FACTION" };
+    return { error: "CANDIDATE_OUT_OF_RANGE" };
+  }
+
+  /**
+   * Convenience wrapper: remove a participant by their reverse-index lookup.
+   * Used by death/disconnect hooks where the caller does not know the battle ID.
+   *
+   * Returns `PARTICIPANT_NOT_IN_BATTLE` when the participant is not tracked —
+   * callers should treat this as non-fatal (the participant may have already
+   * been removed by a concurrent path).
+   */
+  removeParticipantByDeath(participantId: string): BattleResult {
+    const entry = this.participantIndex.get(participantId);
+    if (!entry) return { error: "PARTICIPANT_NOT_IN_BATTLE" };
+    return this.removeParticipant(entry.battleId, participantId);
   }
 
 }
