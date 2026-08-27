@@ -1009,3 +1009,32 @@ describe("BattleManager ownership and configuration", () => {
     expect(battle.playerSide.area.center).toEqual(point(0, 0));
   });
 });
+
+describe("BattleManager lifecycle invariants", () => {
+  it("BM-L01 createBattle sets both sides to ACTIVE (never FLEEING/RESOLVED)", () => {
+    const manager = new BattleManager();
+    const battle = battleOf(
+      manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))),
+    );
+    expect(battle.playerSide.state).toBe("ACTIVE");
+    expect(battle.enemySide.state).toBe("ACTIVE");
+  });
+
+  it("BM-L02 eliminating all participants sets side to ELIMINATED (not FLEEING/RESOLVED)", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    battleOf(manager.updateParticipantState("b1", "p1", "ELIMINATED"));
+    const battle = battleOf(manager.updateParticipantState("b1", "e1", "ELIMINATED"));
+    expect(battle.enemySide.state).toBe("ELIMINATED");
+    expect(battle.enemySide.state).not.toBe("FLEEING");
+    expect(battle.enemySide.state).not.toBe("RESOLVED");
+  });
+
+  it("BM-L03 setting participant to FLEEING does not change side state", () => {
+    const manager = new BattleManager();
+    battleOf(manager.createBattle("b1", participant("p1", point(0, 0)), participant("e1", point(5, 0))));
+    const battle = battleOf(manager.updateParticipantState("b1", "p1", "FLEEING"));
+    expect(battle.playerSide.state).toBe("ACTIVE");
+    expect(battle.playerSide.participants[0].state).toBe("FLEEING");
+  });
+});

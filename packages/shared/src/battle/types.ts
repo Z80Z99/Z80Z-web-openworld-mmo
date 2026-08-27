@@ -52,10 +52,32 @@ export interface BattleGroup {
 
 /* ── State / decision unions ── */
 
-/** Lifecycle state of a BattleGroup. */
+/**
+ * Side-level lifecycle state for a BattleSide within a BattleGroup.
+ *
+ * ACTIVE   — Side has living participants and a leader; normal engagement.
+ * FLEEING  — Leader has retreated outside the enemy area; reserved for
+ *            Phase 2+ state-machine wiring (not yet set by BattleManager).
+ * RESOLVED — Both leaders outside opposing areas; battle can be removed.
+ *            Checked by `shouldResolveBattle()` but state is never set —
+ *            BattleManager deletes directly after the guard passes.
+ * ELIMINATED — All participants dead or removed; no survivors remain.
+ *
+ * BattleManager currently only transitions between ACTIVE ↔ ELIMINATED.
+ * FLEEING and RESOLVED are declared for future rule integration.
+ */
 export type BattleState = "ACTIVE" | "FLEEING" | "RESOLVED" | "ELIMINATED";
 
-/** Lifecycle state of an individual participant. */
+/**
+ * Individual participant lifecycle state, independent of side-level state.
+ *
+ * ACTIVE     — Unit is alive and participating.
+ * FLEEING    — Unit has retreated; set via `BattleManager.updateParticipantState()`.
+ * ELIMINATED — Unit is dead or removed.
+ *
+ * Participant FLEEING is a distinct concept from side-level FLEEING
+ * (leader retreat). The two are not yet wired together.
+ */
 export type ParticipantState = "ACTIVE" | "FLEEING" | "ELIMINATED";
 
 /** AI behavioural disposition used by the engagement decision. */

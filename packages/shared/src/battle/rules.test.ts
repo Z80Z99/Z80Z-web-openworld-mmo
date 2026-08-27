@@ -452,3 +452,67 @@ describe("Purity", () => {
     expect(distanceSquared(at(1, 2), at(4, 6))).toBe(distanceSquared(at(1, 2), at(4, 6)));
   });
 });
+
+/* ════════════════ Lifecycle edge cases (Phase 1.5) ════════════════ */
+
+describe("shouldResolveBattle edge cases", () => {
+  it("FL-010 both leaders null resolves", () => {
+    expect(shouldResolveBattle({
+      firstLeader: null,
+      secondLeader: null,
+      firstEnemyArea: area(at(0, 0), 5),
+      secondEnemyArea: area(at(0, 0), 5),
+    })).toBe(true);
+  });
+
+  it("FL-011 first null, second inside does not resolve", () => {
+    expect(shouldResolveBattle({
+      firstLeader: null,
+      secondLeader: participant("B", 1, 1),
+      firstEnemyArea: area(at(0, 0), 5),
+      secondEnemyArea: area(at(0, 0), 5),
+    })).toBe(false);
+  });
+
+  it("FL-012 first inside, second null does not resolve", () => {
+    expect(shouldResolveBattle({
+      firstLeader: participant("A", 1, 1),
+      secondLeader: null,
+      firstEnemyArea: area(at(0, 0), 5),
+      secondEnemyArea: area(at(0, 0), 5),
+    })).toBe(false);
+  });
+});
+
+describe("shouldEnterFleeing edge cases", () => {
+  it("FL-013 FLEEING leader outside returns true (state not checked)", () => {
+    expect(
+      shouldEnterFleeing({
+        leader: participant("L", 6, 0, { state: "FLEEING" as ParticipantState }),
+        enemyArea: area(at(0, 0), 5),
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("shouldRejoin edge cases", () => {
+  it("FL-014 null leader does not rejoin", () => {
+    expect(shouldRejoin({ leader: null, enemyArea: area(at(0, 0), 5) })).toBe(false);
+  });
+});
+
+describe("calculateBattleAreaRadius edge cases", () => {
+  it("BA-014 NaN participant count throws RangeError", () => {
+    expect(() => calculateBattleAreaRadius(NaN)).toThrow(RangeError);
+  });
+
+  it("BA-015 Infinity participant count throws RangeError", () => {
+    expect(() => calculateBattleAreaRadius(Infinity)).toThrow(RangeError);
+  });
+
+  it("BA-016 invalid config (baseRadius > maxRadius) throws RangeError", () => {
+    expect(() =>
+      calculateBattleAreaRadius(1, { baseRadius: 10, maxRadius: 5, expansionRate: 1, diminishingReturnScale: 1 }),
+    ).toThrow(RangeError);
+  });
+});

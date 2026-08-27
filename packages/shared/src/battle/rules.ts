@@ -70,7 +70,11 @@ function validateAreaConfig(config: BattleAreaConfig): void {
  * participant contributes less than the previous one, and the radius is
  * clamped at maxRadius — never a linear baseRadius * count multiplication.
  *
- * A non-positive participant count is normalized to zero.
+ * Edge cases:
+ *   - participantCount <= 0 yields baseRadius (a battle area with no
+ *     participants still has a defined radius for zone calculations).
+ *   - NaN or Infinity throws RangeError.
+ *   - Invalid config (e.g. baseRadius > maxRadius) throws RangeError.
  */
 export function calculateBattleAreaRadius(
   participantCount: number,
@@ -157,8 +161,17 @@ export function decideEngagement(
 /* ── Flee / rejoin / resolve ── */
 
 /**
- * A side's leader should enter FLEEING when the leader exists, is not
- * eliminated, and stands outside the enemy battle area.
+ * Whether a side's leader should enter FLEEING state.
+ *
+ * Returns true when the leader exists, is not ELIMINATED, and stands
+ * outside the enemy battle area.
+ *
+ * **Important**: This function does NOT check whether the leader is
+ * already FLEEING — the caller is responsible for state gating before
+ * calling this predicate.
+ *
+ * This is a pure predicate for the side-level flee decision; it is not
+ * yet wired into BattleManager (Phase 2+).
  */
 export function shouldEnterFleeing(context: LeaderAreaContext): boolean {
   const { leader, enemyArea } = context;
@@ -168,8 +181,14 @@ export function shouldEnterFleeing(context: LeaderAreaContext): boolean {
 }
 
 /**
- * A fleeing leader should rejoin (return to ACTIVE) when back inside the
- * enemy battle area.
+ * Whether a FLEEING leader should rejoin (return to ACTIVE) when back
+ * inside the enemy battle area.
+ *
+ * Only returns true when the leader's current state is FLEEING and their
+ * position is inside the enemy area. This is the symmetric counterpart
+ * to `shouldEnterFleeing()`.
+ *
+ * Not yet wired into BattleManager (Phase 2+).
  */
 export function shouldRejoin(context: LeaderAreaContext): boolean {
   const { leader, enemyArea } = context;
@@ -179,8 +198,15 @@ export function shouldRejoin(context: LeaderAreaContext): boolean {
 }
 
 /**
- * A battle group is resolved when BOTH leaders are outside the opposing
- * battle area (an eliminated or missing leader counts as outside).
+ * Whether a battle group has met the conditions for resolution.
+ *
+ * Resolved when BOTH leaders are outside opposing battle areas.
+ * An ELIMINATED or null leader counts as "outside" (already withdrawn).
+ *
+ * Used by `BattleManager.removeBattle()` as a guard — if this returns
+ * false, removal is rejected with `BATTLE_NOT_RESOLVED`. Note that
+ * BattleManager never sets `BattleSide.state` to `"RESOLVED"`; it
+ * deletes the battle directly after this guard passes.
  */
 export function shouldResolveBattle(context: BattleResolutionContext): boolean {
   const { firstLeader, secondLeader, firstEnemyArea, secondEnemyArea } = context;
