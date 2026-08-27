@@ -83,9 +83,6 @@ export class GameState {
   public xp = 0;
   public xpToNextLevel = 100;
 
-  /** Pending combat events to process. */
-  public readonly pendingCombatEvents: CombatEvent[] = [];
-
   /* ── Turn-based encounter state ── */
   public inEncounter = false;
   public encounterMobId: string | null = null;
@@ -240,17 +237,6 @@ export class GameState {
     if (mob) {
       mob.isAggro = isAggro;
     }
-  }
-
-  /* ── Combat ── */
-
-  addCombatEvent(event: CombatEvent): void {
-    this.pendingCombatEvents.push(event);
-  }
-
-  /** Drain pending combat events (call once per frame). */
-  drainCombatEvents(): CombatEvent[] {
-    return this.pendingCombatEvents.splice(0);
   }
 
   /* ── Chunk prediction ── */

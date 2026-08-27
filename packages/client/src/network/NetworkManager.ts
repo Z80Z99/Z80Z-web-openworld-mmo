@@ -275,7 +275,6 @@ export class NetworkManager {
 
     // Listen for combat events
     this.room.onMessage("combat_event", (event: any) => {
-      this.gameState.addCombatEvent(event);
       this.callbacks.onCombatEvent?.(event);
     });
 
