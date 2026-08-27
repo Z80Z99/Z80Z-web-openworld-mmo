@@ -138,6 +138,20 @@ export class EncounterSystem {
     this.mobIndex.delete(encounter.mobId);
   }
 
+  /**
+   * End any encounter referencing this mob (e.g. the mob was removed from the
+   * world by an AOI chunk prune). Releases both the player and mob slots.
+   * Returns the released player ID, or undefined if the mob was not in an encounter.
+   */
+  endEncounterForMob(mobId: string): string | undefined {
+    const playerId = this.mobIndex.get(mobId);
+    if (!playerId) return undefined;
+    const encounter = this.encounters.get(playerId);
+    if (!encounter) return undefined;
+    this.endEncounter(encounter, "player_died");
+    return playerId;
+  }
+
   // ── Player Actions ──
 
   /**

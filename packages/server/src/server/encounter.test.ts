@@ -316,3 +316,36 @@ describe("endEncounter", () => {
     expect(error).toBe("no_encounter");
   });
 });
+
+/* ── endEncounterForMob (mob removed from world, e.g. AOI chunk prune) ── */
+
+describe("endEncounterForMob", () => {
+  let sys: EncounterSystem;
+  beforeEach(() => {
+    sys = makeSystem();
+  });
+
+  it("releases the player and mob slots when a mob is removed", () => {
+    beginPlayerFight(sys, { mobHp: 80 });
+    expect(sys.hasEncounter("p1")).toBe(true);
+
+    const releasedPlayer = sys.endEncounterForMob("m1");
+    expect(releasedPlayer).toBe("p1");
+    expect(sys.hasEncounter("p1")).toBe(false);
+
+    // The same mob can now start an encounter with another player.
+    const { encounter, error } = sys.beginEncounter(
+      "p2",
+      "m1",
+      "player",
+      { mobHp: 80, mobMaxHp: 80, playerHp: 100, playerMaxHp: 100 },
+      NOW,
+    );
+    expect(error).toBeUndefined();
+    expect(encounter!.playerId).toBe("p2");
+  });
+
+  it("returns undefined when the mob is not in any encounter", () => {
+    expect(sys.endEncounterForMob("m1")).toBeUndefined();
+  });
+});
