@@ -114,7 +114,7 @@ export class GameRoom extends Room<RoomState> {
     this.mountSystem = new MountSystem(this.db);
 
     // Mob spawner
-    this.mobSpawner = new MobSpawner(this.worldGen, this.combatSystem);
+    this.mobSpawner = new MobSpawner(this.worldGen);
 
     // Tile physics system (event-driven, processes when tiles change)
     this.tilePhysics = new TilePhysics(this.db);
@@ -685,6 +685,10 @@ export class GameRoom extends Room<RoomState> {
 
       const mob = this.mobSpawner.getMob(message.targetId);
       if (!mob || mob.aiState === "dead") return;
+
+      // A mob locked in another player's encounter must not be attackable —
+      // otherwise the encounter owner's combat state can never resolve.
+      if (mob.inEncounter) return;
 
       // Server-authoritative melee range check (silent ignore on miss).
       const PLAYER_ATTACK_RANGE = 2.5;

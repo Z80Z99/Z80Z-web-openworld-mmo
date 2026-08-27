@@ -471,13 +471,11 @@ describe("CombatSystem", () => {
 
 describe("MobSpawner", () => {
   let worldGen: WorldGenerator;
-  let cs: CombatSystem;
   let spawner: MobSpawner;
 
   beforeEach(() => {
     worldGen = new WorldGenerator(42);
-    cs = new CombatSystem();
-    spawner = new MobSpawner(worldGen, cs);
+    spawner = new MobSpawner(worldGen);
   });
 
   describe("spawnMobsForChunk", () => {
@@ -555,6 +553,37 @@ describe("MobSpawner", () => {
             return;
           }
         }
+      }
+    });
+  });
+
+  describe("onMobRemoved callback", () => {
+    it("fires once per mob deleted by removeMobsForChunk, only for that chunk", () => {
+      const removed: string[] = [];
+      const hookSpawner = new MobSpawner(worldGen, (id) => removed.push(id));
+
+      let targetChunk: { cx: number; cy: number } | null = null;
+      for (let cx = -5; cx <= 5 && !targetChunk; cx++) {
+        for (let cy = -5; cy <= 5; cy++) {
+          const mobs = hookSpawner.spawnMobsForChunk(cx, cy);
+          if (mobs.length > 0) {
+            targetChunk = { cx, cy };
+            break;
+          }
+        }
+      }
+      if (!targetChunk) throw new Error("no spawnable chunk found");
+
+      const before = Array.from(hookSpawner.getAllMobs().values()).filter(
+        (m) => m.chunkX === targetChunk!.cx && m.chunkY === targetChunk!.cy,
+      );
+      expect(before.length).toBeGreaterThan(0);
+
+      hookSpawner.removeMobsForChunk(targetChunk.cx, targetChunk.cy);
+
+      expect(removed.length).toBe(before.length);
+      for (const mob of before) {
+        expect(removed).toContain(mob.id);
       }
     });
   });

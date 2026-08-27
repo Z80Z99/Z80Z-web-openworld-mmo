@@ -7,7 +7,6 @@ import {
   type CombatEvent,
   MOB_TYPES,
   getMobTypeForBiome,
-  CombatSystem,
 } from "./CombatSystem.js";
 
 /* ── Constants ── */
@@ -52,11 +51,13 @@ export class MobSpawner {
   private nextMobId = 1;
 
   private readonly worldGen: WorldGenerator;
-  private readonly combatSystem: CombatSystem;
+  /** Invoked with a mob ID immediately before it is removed from the world
+   *  (AOI chunk prune). Lets the room release any encounter referencing it. */
+  private readonly onMobRemoved?: (mobId: string) => void;
 
-  constructor(worldGen: WorldGenerator, combatSystem: CombatSystem) {
+  constructor(worldGen: WorldGenerator, onMobRemoved?: (mobId: string) => void) {
     this.worldGen = worldGen;
-    this.combatSystem = combatSystem;
+    this.onMobRemoved = onMobRemoved;
   }
 
   /** Get all active mobs (including dead ones awaiting respawn). */
@@ -110,6 +111,7 @@ export class MobSpawner {
     const key = `${cx},${cy}`;
     for (const [id, mob] of this.mobs) {
       if (mob.chunkX === cx && mob.chunkY === cy) {
+        this.onMobRemoved?.(id);
         this.mobs.delete(id);
       }
     }
