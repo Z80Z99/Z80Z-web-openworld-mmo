@@ -29,4 +29,8 @@ export type {
   EngagementContext,
   LeaderAreaContext,
   BattleResolutionContext,
+  /* ── Phase 3B: Combat Session ── */
+  CombatState,
+  CombatParticipantState,
+  CombatSession,
 } from "./types.js";

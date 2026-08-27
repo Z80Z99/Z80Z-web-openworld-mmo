@@ -149,3 +149,48 @@ export interface BattleResolutionContext {
   /** Enemy area of the SECOND leader (belongs to the first side). */
   readonly secondEnemyArea: BattleArea;
 }
+
+/* ── Combat Session — Domain Types (Phase 3B) ──
+ *
+ * Pure, runtime-free type definitions for the turn-based combat session.
+ * A CombatSession owns combat state (turn order, HP, initiative, rounds)
+ * but does NOT own spatial state (BattleArea, positions, join/leave).
+ *
+ * BattleGroup owns membership + spatial relationship.
+ * CombatSession owns combat action + turn + resolution state.
+ *
+ * These types MUST NOT depend on GameRoom, Colyseus, Player/Mob classes,
+ * or any network layer.
+ */
+
+/** Combat session lifecycle state. Independent of BattleGroup state. */
+export type CombatState = "FORMING" | "ACTIVE" | "RESOLVED";
+
+/** Per-participant combat state within a CombatSession. */
+export interface CombatParticipantState {
+  /** References a BattleParticipant.id — NOT a copy of BattleParticipant. */
+  readonly participantId: string;
+  readonly currentHp: number;
+  readonly maxHp: number;
+  /** Initiative value for turn order (higher = earlier turn). */
+  readonly initiative: number;
+  /** Whether this participant is alive and can act. */
+  readonly alive: boolean;
+  /** Whether this participant is defending (reduces incoming damage). */
+  readonly defending: boolean;
+}
+
+/** A combat session: turn-based combat state for a battle. */
+export interface CombatSession {
+  readonly id: string;
+  /** References the BattleGroup this combat belongs to. */
+  readonly battleId: string;
+  readonly state: CombatState;
+  readonly round: number;
+  /** ID of the participant whose turn it is. Must be in turnOrder. */
+  readonly currentActorId: string;
+  /** Ordered list of participant IDs representing turn order. Each ID must be unique. */
+  readonly turnOrder: readonly string[];
+  /** Combat participants, keyed by participantId. */
+  readonly participants: readonly CombatParticipantState[];
+}
