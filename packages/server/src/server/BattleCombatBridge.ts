@@ -133,16 +133,11 @@ export class BattleCombatBridge {
       return { error: "ACTIVE_COMBAT_EXISTS" };
     }
 
-    // 3. Collect eligible participants from both sides
-    const allParticipants = [
-      ...battle.playerSide.participants,
-      ...battle.enemySide.participants,
+    // 3. Collect eligible participants from both sides with side info
+    const combatParticipants = [
+      ...this.buildCombatParticipants(battle.playerSide.participants, hpProvider, "player"),
+      ...this.buildCombatParticipants(battle.enemySide.participants, hpProvider, "enemy"),
     ];
-
-    const combatParticipants = this.buildCombatParticipants(
-      allParticipants,
-      hpProvider,
-    );
 
     if (combatParticipants.length === 0) {
       return { error: "NO_ELIGIBLE_PARTICIPANTS" };
@@ -229,6 +224,7 @@ export class BattleCombatBridge {
   private buildCombatParticipants(
     participants: readonly BattleParticipant[],
     hpProvider: HpProvider,
+    side: "player" | "enemy",
   ): CombatParticipantState[] {
     const result: CombatParticipantState[] = [];
     const seenIds = new Set<string>();
@@ -255,6 +251,7 @@ export class BattleCombatBridge {
         initiative: p.combatPower,
         alive: true,
         defending: false,
+        side,
       });
     }
 

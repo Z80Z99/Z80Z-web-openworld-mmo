@@ -3,7 +3,10 @@ import type {
   CombatParticipantState,
   CombatState,
   CombatManagerError,
+  CombatStatsProvider,
+  DamageResult,
 } from "@mmo/shared";
+import { calculateDamage } from "./CombatSystem.js";
 
 /* ── Mutable internal types (mirrors BattleManager pattern) ── */
 
@@ -14,6 +17,7 @@ type MutableCombatParticipant = {
   initiative: number;
   alive: boolean;
   defending: boolean;
+  side: "player" | "enemy";
 };
 
 type MutableCombatSession = {
@@ -123,6 +127,7 @@ export class CombatManager {
         initiative: p.initiative,
         alive: p.alive,
         defending: p.defending,
+        side: p.side,
       }),
     );
 
@@ -192,6 +197,7 @@ export class CombatManager {
       initiative: participant.initiative,
       alive: participant.alive,
       defending: participant.defending,
+      side: participant.side,
     });
     session.turnOrder.push(participant.participantId);
     this.participantIndex.set(participant.participantId, combatId);
@@ -240,6 +246,92 @@ export class CombatManager {
     this.advanceToNextAlive(session);
 
     return { session: toSnapshotSession(session) };
+  }
+
+  /**
+   * Apply an attack from attacker to target within a combat session.
+   *
+   * Validates: combat exists, active, attacker/target exist and alive,
+   * attacker is current actor, opposing sides, no self-attack.
+   *
+   * Uses CombatSystem.calculateDamage() for damage formula (no duplication).
+   * Advances turn after successful attack.
+   */
+  applyAttack(
+    combatId: string,
+    attackerId: string,
+    targetId: string,
+    statsProvider: CombatStatsProvider,
+  ): { readonly result: DamageResult } | CombatFailure {
+    // 1. Combat exists
+    const session = this.sessions.get(combatId);
+    if (!session) return { error: "COMBAT_NOT_FOUND" };
+
+    // 2. Combat ACTIVE
+    if (session.state !== "ACTIVE") return { error: "COMBAT_NOT_ACTIVE" };
+
+    // 3. Attacker exists
+    const attacker = session.participants.find(
+      (p) => p.participantId === attackerId,
+    );
+    if (!attacker) return { error: "PARTICIPANT_NOT_FOUND" };
+
+    // 4. Attacker alive
+    if (!attacker.alive) return { error: "ATTACKER_NOT_ALIVE" };
+
+    // 5. Target exists
+    const target = session.participants.find(
+      (p) => p.participantId === targetId,
+    );
+    if (!target) return { error: "TARGET_NOT_FOUND" };
+
+    // 6. Target alive
+    if (!target.alive) return { error: "TARGET_NOT_ALIVE" };
+
+    // 7. Attacker is current actor
+    if (session.currentActorId !== attackerId) return { error: "NOT_CURRENT_ACTOR" };
+
+    // 8. No self-attack (must be before friendly-fire check)
+    if (attackerId === targetId) return { error: "SELF_ATTACK_REJECTED" };
+
+    // 9. Opposing sides (敌对)
+    if (attacker.side === target.side) return { error: "FRIENDLY_FIRE_REJECTED" };
+
+    // Resolve stats
+    const attackerStats = statsProvider.getStats(attackerId);
+    const targetStats = statsProvider.getStats(targetId);
+    if (!attackerStats || !targetStats) return { error: "PARTICIPANT_NOT_FOUND" };
+
+    // Calculate damage (reuse existing function — no formula duplication)
+    const damage = calculateDamage(
+      attackerStats.attack,
+      attackerStats.level,
+      targetStats.defense,
+    );
+
+    // Apply damage: clamp to [0, maxHp]
+    target.currentHp = Math.max(0, target.currentHp - damage);
+
+    // Kill check
+    const targetKilled = target.currentHp === 0;
+    if (targetKilled) {
+      target.alive = false;
+      target.defending = false;
+    }
+
+    // Advance turn
+    this.advanceToNextAlive(session);
+
+    // Return result
+    return {
+      result: {
+        attackerId,
+        targetId,
+        damage,
+        remainingHp: target.currentHp,
+        targetKilled,
+      },
+    };
   }
 
   /** Set the combat state directly. */

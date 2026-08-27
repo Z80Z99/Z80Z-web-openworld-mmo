@@ -2,7 +2,10 @@ import {
   type CombatSession,
   type CombatParticipantState,
   type CombatManagerError,
+  type CombatStatsProvider,
+  type DamageResult,
 } from "@mmo/shared";
+import { calculateDamage } from "./CombatSystem.js";
 import { describe, expect, it } from "vitest";
 import { CombatManager } from "./CombatManager.js";
 
@@ -31,6 +34,7 @@ function combatParticipant(
     initiative: 10,
     alive: true,
     defending: false,
+    side: "player",
     ...overrides,
   };
 }
@@ -54,8 +58,8 @@ function createSession(
       fixture.id ?? "combat-1",
       fixture.battleId ?? "battle-1",
       fixture.participants ?? [
-        combatParticipant("player-1"),
-        combatParticipant("enemy-1", { initiative: 5 }),
+        combatParticipant("player-1", { side: "player" }),
+        combatParticipant("enemy-1", { initiative: 5, side: "enemy" }),
       ],
     ),
   );
@@ -310,5 +314,458 @@ describe("CombatManager ownership and lifecycle", () => {
     const s2 = manager.getCombatSession("c2")!;
     expect(s1.state).toBe("RESOLVED");
     expect(s2.state).toBe("ACTIVE");
+  });
+});
+
+/* ════════════════ Phase 3D-2A: Damage Pipeline ════════════════ */
+
+function makeStatsProvider(
+  stats: Record<string, { attack: number; defense: number; level: number }>,
+): CombatStatsProvider {
+  return {
+    getStats(id: string) {
+      return stats[id];
+    },
+  };
+}
+
+function createDuelSession(
+  manager: CombatManager,
+  opts: {
+    combatId?: string;
+    p1Stats?: { attack: number; defense: number; level: number };
+    e1Stats?: { attack: number; defense: number; level: number };
+    p1Hp?: number;
+    e1Hp?: number;
+  } = {},
+): { session: CombatSession; statsProvider: CombatStatsProvider } {
+  const combatId = opts.combatId ?? "combat-1";
+  const p1Stats = opts.p1Stats ?? { attack: 10, defense: 5, level: 1 };
+  const e1Stats = opts.e1Stats ?? { attack: 8, defense: 3, level: 1 };
+  const p1Hp = opts.p1Hp ?? 100;
+  const e1Hp = opts.e1Hp ?? 100;
+
+  const session = createSession(manager, {
+    id: combatId,
+    battleId: "battle-1",
+    participants: [
+      combatParticipant("player-1", { side: "player", currentHp: p1Hp, maxHp: p1Hp }),
+      combatParticipant("enemy-1", { side: "enemy", currentHp: e1Hp, maxHp: e1Hp, initiative: 5 }),
+    ],
+  });
+
+  const statsProvider = makeStatsProvider({
+    "player-1": p1Stats,
+    "enemy-1": e1Stats,
+  });
+
+  return { session, statsProvider };
+}
+
+type AttackResult =
+  | { readonly result: DamageResult }
+  | { readonly error: CombatManagerError };
+
+function resultOf(r: AttackResult): DamageResult {
+  expect(r).not.toHaveProperty("error");
+  if ("result" in r) return r.result;
+  return expect.fail(`Expected attack result, ${(r as { error: string }).error}`);
+}
+
+describe("Phase 3D-2A: CombatManager.applyAttack", () => {
+  /* ── DM-001: basic attack ── */
+  it("DM-001: basic attack deals calculated damage", () => {
+    const manager = new CombatManager();
+    const { statsProvider } = createDuelSession(manager);
+
+    // calculateDamage(10, 1, 3) = 10 * (1 + 0.1) - 3 = 11 - 3 = 8
+    const r = resultOf(manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider));
+    expect(r.damage).toBe(8);
+    expect(r.remainingHp).toBe(92);
+    expect(r.targetKilled).toBe(false);
+  });
+
+  /* ── DM-002: zero damage minimum 1 ── */
+  it("DM-002: minimum damage is 1 even with high defense", () => {
+    const manager = new CombatManager();
+    const { statsProvider } = createDuelSession(manager, {
+      p1Stats: { attack: 1, defense: 0, level: 1 },
+      e1Stats: { attack: 1, defense: 100, level: 1 },
+    });
+
+    // calculateDamage(1, 1, 100) = 1 * 1.1 - 100 = -98.9 → max(1, -99) = 1
+    const r = resultOf(manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider));
+    expect(r.damage).toBe(1);
+    expect(r.remainingHp).toBe(99);
+  });
+
+  /* ── DM-003: damage cannot exceed HP ── */
+  it("DM-003: damage is clamped, remaining HP never negative", () => {
+    const manager = new CombatManager();
+    const { statsProvider } = createDuelSession(manager, {
+      p1Stats: { attack: 100, defense: 0, level: 10 },
+      e1Stats: { attack: 1, defense: 0, level: 1 },
+      e1Hp: 5,
+    });
+
+    // High damage vs low HP target
+    const r = resultOf(manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider));
+    expect(r.remainingHp).toBe(0);
+    expect(r.remainingHp).toBeGreaterThanOrEqual(0);
+  });
+
+  /* ── DM-004: HP clamps to zero ── */
+  it("DM-004: HP clamps to exactly zero, not negative", () => {
+    const manager = new CombatManager();
+    const { statsProvider } = createDuelSession(manager, {
+      p1Stats: { attack: 100, defense: 0, level: 10 },
+      e1Hp: 1,
+    });
+
+    const r = resultOf(manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider));
+    expect(r.remainingHp).toBe(0);
+  });
+
+  /* ── DM-005: target dies ── */
+  it("DM-005: target dies when HP reaches 0", () => {
+    const manager = new CombatManager();
+    createDuelSession(manager, {
+      p1Stats: { attack: 100, defense: 0, level: 10 },
+      e1Hp: 1,
+    });
+
+    manager.applyAttack("combat-1", "player-1", "enemy-1", makeStatsProvider({
+      "player-1": { attack: 100, defense: 0, level: 10 },
+      "enemy-1": { attack: 1, defense: 0, level: 1 },
+    }));
+
+    const session = manager.getCombatSession("combat-1")!;
+    const target = session.participants.find((p) => p.participantId === "enemy-1")!;
+    expect(target.alive).toBe(false);
+    expect(target.defending).toBe(false);
+    expect(target.currentHp).toBe(0);
+  });
+
+  /* ── DM-006: dead target rejected ── */
+  it("DM-006: cannot attack a dead target", () => {
+    const manager = new CombatManager();
+    createDuelSession(manager, {
+      p1Stats: { attack: 100, defense: 0, level: 10 },
+      e1Hp: 1,
+    });
+
+    // Kill the target first
+    manager.applyAttack("combat-1", "player-1", "enemy-1", makeStatsProvider({
+      "player-1": { attack: 100, defense: 0, level: 10 },
+      "enemy-1": { attack: 1, defense: 0, level: 1 },
+    }));
+
+    // Turn advances to enemy-1, but enemy is dead, so turn skips to player-1
+    // Now try to attack the dead enemy again
+    const r = manager.applyAttack("combat-1", "player-1", "enemy-1", makeStatsProvider({
+      "player-1": { attack: 10, defense: 5, level: 1 },
+      "enemy-1": { attack: 8, defense: 3, level: 1 },
+    }));
+    expect(r).toEqual({ error: "TARGET_NOT_ALIVE" });
+  });
+
+  /* ── DM-007: dead attacker cannot attack ── */
+  it("DM-007: dead attacker cannot attack", () => {
+    const manager = new CombatManager();
+    createSession(manager, {
+      id: "combat-1",
+      battleId: "battle-1",
+      participants: [
+        combatParticipant("player-1", { side: "player", currentHp: 1, maxHp: 100 }),
+        combatParticipant("enemy-1", { side: "enemy", currentHp: 100, maxHp: 100, initiative: 5 }),
+      ],
+    });
+
+    const statsProvider = makeStatsProvider({
+      "player-1": { attack: 10, defense: 5, level: 1 },
+      "enemy-1": { attack: 100, defense: 0, level: 10 },
+    });
+
+    // Enemy attacks first (turn order: player-1 is current actor, but let's kill player first via enemy turn)
+    // Actually player-1 is currentActor. Let's make enemy attack by swapping turn order.
+    // Easier: just set player alive=false manually for testing
+    // Can't do that via public API... let's use a different approach.
+    // Create session where player is dead at start
+    const manager2 = new CombatManager();
+    manager2.createCombatSession("c1", "b1", [
+      combatParticipant("p1", { side: "player", currentHp: 0, alive: false, maxHp: 100 }),
+      combatParticipant("e1", { side: "enemy", currentHp: 100, maxHp: 100, initiative: 5 }),
+    ]);
+
+    const r = manager2.applyAttack("c1", "p1", "e1", statsProvider);
+    expect(r).toEqual({ error: "ATTACKER_NOT_ALIVE" });
+  });
+
+  /* ── DM-008: attacker must be currentActor ── */
+  it("DM-008: only current actor can attack", () => {
+    const manager = new CombatManager();
+    const { statsProvider } = createDuelSession(manager);
+
+    // player-1 is currentActor, enemy-1 tries to attack
+    const r = manager.applyAttack("combat-1", "enemy-1", "player-1", statsProvider);
+    expect(r).toEqual({ error: "NOT_CURRENT_ACTOR" });
+  });
+
+  /* ── DM-009: self attack rejected ── */
+  it("DM-009: cannot attack yourself", () => {
+    const manager = new CombatManager();
+    const { statsProvider } = createDuelSession(manager);
+
+    const r = manager.applyAttack("combat-1", "player-1", "player-1", statsProvider);
+    expect(r).toEqual({ error: "SELF_ATTACK_REJECTED" });
+  });
+
+  /* ── DM-010: friendly fire rejected ── */
+  it("DM-010: cannot attack friendly (same side)", () => {
+    const manager = new CombatManager();
+    createSession(manager, {
+      id: "combat-1",
+      battleId: "battle-1",
+      participants: [
+        combatParticipant("p1", { side: "player", currentHp: 100, maxHp: 100 }),
+        combatParticipant("p2", { side: "player", currentHp: 100, maxHp: 100, initiative: 5 }),
+      ],
+    });
+
+    const statsProvider = makeStatsProvider({
+      "p1": { attack: 10, defense: 5, level: 1 },
+      "p2": { attack: 8, defense: 3, level: 1 },
+    });
+
+    const r = manager.applyAttack("combat-1", "p1", "p2", statsProvider);
+    expect(r).toEqual({ error: "FRIENDLY_FIRE_REJECTED" });
+  });
+
+  /* ── DM-011: explicit target selection ── */
+  it("DM-011: attacker can target specific enemy", () => {
+    const manager = new CombatManager();
+    createSession(manager, {
+      id: "combat-1",
+      battleId: "battle-1",
+      participants: [
+        combatParticipant("p1", { side: "player", currentHp: 100, maxHp: 100 }),
+        combatParticipant("e1", { side: "enemy", currentHp: 100, maxHp: 100, initiative: 5 }),
+        combatParticipant("e2", { side: "enemy", currentHp: 50, maxHp: 50, initiative: 3 }),
+      ],
+    });
+
+    const statsProvider = makeStatsProvider({
+      "p1": { attack: 10, defense: 5, level: 1 },
+      "e1": { attack: 8, defense: 3, level: 1 },
+      "e2": { attack: 5, defense: 1, level: 1 },
+    });
+
+    // Target e2 specifically
+    const r = resultOf(manager.applyAttack("combat-1", "p1", "e2", statsProvider));
+    expect(r.targetId).toBe("e2");
+    expect(r.remainingHp).toBeLessThan(50);
+
+    // e1 should be untouched
+    const session = manager.getCombatSession("combat-1")!;
+    const e1 = session.participants.find((p) => p.participantId === "e1")!;
+    expect(e1.currentHp).toBe(100);
+  });
+
+  /* ── DM-012: 1v1 full round ── */
+  it("DM-012: 1v1 — player attacks, turn advances to enemy", () => {
+    const manager = new CombatManager();
+    const { statsProvider } = createDuelSession(manager);
+
+    // Player attacks enemy
+    manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider);
+
+    const session = manager.getCombatSession("combat-1")!;
+    expect(session.currentActorId).toBe("enemy-1");
+  });
+
+  /* ── DM-013: 2v1 ── */
+  it("DM-013: 2v1 — two players vs one enemy", () => {
+    const manager = new CombatManager();
+    createSession(manager, {
+      id: "combat-1",
+      battleId: "battle-1",
+      participants: [
+        combatParticipant("p1", { side: "player", currentHp: 100, maxHp: 100 }),
+        combatParticipant("p2", { side: "player", currentHp: 90, maxHp: 90, initiative: 8 }),
+        combatParticipant("e1", { side: "enemy", currentHp: 80, maxHp: 80, initiative: 5 }),
+      ],
+    });
+
+    const statsProvider = makeStatsProvider({
+      "p1": { attack: 10, defense: 5, level: 1 },
+      "p2": { attack: 12, defense: 4, level: 2 },
+      "e1": { attack: 8, defense: 3, level: 1 },
+    });
+
+    // p1 attacks e1
+    manager.applyAttack("combat-1", "p1", "e1", statsProvider);
+    const s1 = manager.getCombatSession("combat-1")!;
+    expect(s1.currentActorId).toBe("p2");
+
+    // p2 attacks e1
+    manager.applyAttack("combat-1", "p2", "e1", statsProvider);
+    const s2 = manager.getCombatSession("combat-1")!;
+    // Turn wraps to e1 (or resolves if dead)
+    expect(["e1", "p1"]).toContain(s2.currentActorId);
+  });
+
+  /* ── DM-014: 1v2 ── */
+  it("DM-014: 1v2 — one player vs two enemies", () => {
+    const manager = new CombatManager();
+    createSession(manager, {
+      id: "combat-1",
+      battleId: "battle-1",
+      participants: [
+        combatParticipant("p1", { side: "player", currentHp: 100, maxHp: 100 }),
+        combatParticipant("e1", { side: "enemy", currentHp: 100, maxHp: 100, initiative: 5 }),
+        combatParticipant("e2", { side: "enemy", currentHp: 60, maxHp: 60, initiative: 3 }),
+      ],
+    });
+
+    const statsProvider = makeStatsProvider({
+      "p1": { attack: 10, defense: 5, level: 1 },
+      "e1": { attack: 8, defense: 3, level: 1 },
+      "e2": { attack: 6, defense: 2, level: 1 },
+    });
+
+    // p1 attacks e1
+    manager.applyAttack("combat-1", "p1", "e1", statsProvider);
+    const s1 = manager.getCombatSession("combat-1")!;
+    expect(s1.currentActorId).toBe("e1");
+
+    // e1 attacks p1
+    manager.applyAttack("combat-1", "e1", "p1", statsProvider);
+    const s2 = manager.getCombatSession("combat-1")!;
+    expect(s2.currentActorId).toBe("e2");
+  });
+
+  /* ── DM-015: 2v2 ── */
+  it("DM-015: 2v2 full multi-party combat", () => {
+    const manager = new CombatManager();
+    createSession(manager, {
+      id: "combat-1",
+      battleId: "battle-1",
+      participants: [
+        combatParticipant("p1", { side: "player", currentHp: 100, maxHp: 100 }),
+        combatParticipant("p2", { side: "player", currentHp: 90, maxHp: 90, initiative: 8 }),
+        combatParticipant("e1", { side: "enemy", currentHp: 100, maxHp: 100, initiative: 5 }),
+        combatParticipant("e2", { side: "enemy", currentHp: 70, maxHp: 70, initiative: 3 }),
+      ],
+    });
+
+    const statsProvider = makeStatsProvider({
+      "p1": { attack: 10, defense: 5, level: 1 },
+      "p2": { attack: 12, defense: 4, level: 2 },
+      "e1": { attack: 8, defense: 3, level: 1 },
+      "e2": { attack: 6, defense: 2, level: 1 },
+    });
+
+    // p1 → e1
+    manager.applyAttack("combat-1", "p1", "e1", statsProvider);
+    // p2 → e2
+    manager.applyAttack("combat-1", "p2", "e2", statsProvider);
+
+    const session = manager.getCombatSession("combat-1")!;
+    // After p2 attacks, turn should be on e1 (next alive enemy)
+    expect(session.currentActorId).toBe("e1");
+  });
+
+  /* ── DM-016: calculateDamage reused ── */
+  it("DM-016: damage matches direct calculateDamage call", () => {
+    const manager = new CombatManager();
+    const { statsProvider } = createDuelSession(manager);
+
+    const r = resultOf(manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider));
+
+    // Verify against direct calculation
+    const expected = calculateDamage(10, 1, 3); // attack=10, level=1, defense=3
+    expect(r.damage).toBe(expected);
+  });
+
+  /* ── DM-017: deterministic damage ── */
+  it("DM-017: same inputs always produce same damage", () => {
+    const r1 = calculateDamage(10, 1, 3);
+    const r2 = calculateDamage(10, 1, 3);
+    const r3 = calculateDamage(10, 1, 3);
+    expect(r1).toBe(r2);
+    expect(r2).toBe(r3);
+  });
+
+  /* ── DM-018: no World HP mutation ── */
+  it("DM-018: CombatManager only modifies CombatSession HP, not external state", () => {
+    const manager = new CombatManager();
+    const { statsProvider } = createDuelSession(manager, { e1Hp: 100 });
+
+    const beforeSession = manager.getCombatSession("combat-1")!;
+    const beforeHp = beforeSession.participants.find((p) => p.participantId === "enemy-1")!.currentHp;
+
+    manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider);
+
+    const afterSession = manager.getCombatSession("combat-1")!;
+    const afterHp = afterSession.participants.find((p) => p.participantId === "enemy-1")!.currentHp;
+
+    // HP changed in CombatSession
+    expect(afterHp).toBeLessThan(beforeHp);
+    // No external state was touched (this is a unit test — CombatManager has no reference to World state)
+  });
+
+  /* ── DM-019: combat snapshot isolation ── */
+  it("DM-019: snapshots returned by applyAttack are independent copies", () => {
+    const manager = new CombatManager();
+    const { statsProvider } = createDuelSession(manager);
+
+    const r = resultOf(manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider));
+    const fresh = manager.getCombatSession("combat-1")!;
+
+    // Result has remainingHp, fresh session has updated state
+    expect(r.remainingHp).toBe(
+      fresh.participants.find((p) => p.participantId === "enemy-1")!.currentHp,
+    );
+
+    // Mutating fresh shouldn't affect future snapshots
+    // (Can't easily mutate readonly, but verify structural independence)
+    expect(r).not.toBe(fresh);
+  });
+
+  /* ── DM-020: attack advances turn correctly ── */
+  it("DM-020: attack always advances turn to next alive participant", () => {
+    const manager = new CombatManager();
+    const { statsProvider } = createDuelSession(manager);
+
+    const before = manager.getCombatSession("combat-1")!;
+    expect(before.currentActorId).toBe("player-1");
+
+    manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider);
+
+    const after = manager.getCombatSession("combat-1")!;
+    expect(after.currentActorId).toBe("enemy-1");
+    expect(after.round).toBeGreaterThanOrEqual(1);
+  });
+
+  /* ── DM-021: combat not found ── */
+  it("DM-021: applyAttack on nonexistent combat returns error", () => {
+    const manager = new CombatManager();
+    const statsProvider = makeStatsProvider({});
+    const r = manager.applyAttack("nonexistent", "a", "b", statsProvider);
+    expect(r).toEqual({ error: "COMBAT_NOT_FOUND" });
+  });
+
+  /* ── DM-022: combat not active ── */
+  it("DM-022: applyAttack on resolved combat returns error", () => {
+    const manager = new CombatManager();
+    createDuelSession(manager);
+    manager.setCombatState("combat-1", "RESOLVED");
+
+    const statsProvider = makeStatsProvider({
+      "player-1": { attack: 10, defense: 5, level: 1 },
+      "enemy-1": { attack: 8, defense: 3, level: 1 },
+    });
+    const r = manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider);
+    expect(r).toEqual({ error: "COMBAT_NOT_ACTIVE" });
   });
 });

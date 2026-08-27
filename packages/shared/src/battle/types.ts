@@ -178,6 +178,8 @@ export interface CombatParticipantState {
   readonly alive: boolean;
   /** Whether this participant is defending (reduces incoming damage). */
   readonly defending: boolean;
+  /** Which side this participant belongs to (for敌对 validation). */
+  readonly side: "player" | "enemy";
 }
 
 /** A combat session: turn-based combat state for a battle. */
@@ -195,6 +197,32 @@ export interface CombatSession {
   readonly participants: readonly CombatParticipantState[];
 }
 
+/* ── Phase 3D-2A: Combat Damage Result Pipeline ── */
+
+/** Possible combat action types. */
+export type CombatActionType = "ATTACK";
+
+/** A combat action performed by an actor targeting a participant. */
+export interface CombatAction {
+  readonly actorId: string;
+  readonly targetId: string;
+  readonly actionType: CombatActionType;
+}
+
+/** Result of applying a combat action (damage dealt). */
+export interface DamageResult {
+  readonly attackerId: string;
+  readonly targetId: string;
+  readonly damage: number;
+  readonly remainingHp: number;
+  readonly targetKilled: boolean;
+}
+
+/** Injectable stats provider — decouples CombatManager from stat storage. */
+export interface CombatStatsProvider {
+  getStats(participantId: string): { attack: number; defense: number; level: number } | undefined;
+}
+
 /* ── CombatManager Error Codes (Phase 3C) ── */
 
 /** Error codes returned by CombatManager public methods. */
@@ -207,4 +235,10 @@ export type CombatManagerError =
   | "PARTICIPANT_NOT_FOUND"
   | "PARTICIPANT_ALREADY_IN_COMBAT"
   | "COMBAT_NOT_ACTIVE"
-  | "NO_ALIVE_PARTICIPANTS";
+  | "NO_ALIVE_PARTICIPANTS"
+  | "TARGET_NOT_ALIVE"
+  | "ATTACKER_NOT_ALIVE"
+  | "NOT_CURRENT_ACTOR"
+  | "SELF_ATTACK_REJECTED"
+  | "FRIENDLY_FIRE_REJECTED"
+  | "TARGET_NOT_FOUND";

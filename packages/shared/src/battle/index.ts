@@ -35,4 +35,9 @@ export type {
   CombatSession,
   /* ── Phase 3C: CombatManager ── */
   CombatManagerError,
+  /* ── Phase 3D-2A: Combat Damage Result Pipeline ── */
+  CombatActionType,
+  CombatAction,
+  DamageResult,
+  CombatStatsProvider,
 } from "./types.js";

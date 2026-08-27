@@ -17,6 +17,7 @@ function combatParticipant(
     initiative: 10,
     alive: true,
     defending: false,
+    side: "player",
     ...overrides,
   };
 }
