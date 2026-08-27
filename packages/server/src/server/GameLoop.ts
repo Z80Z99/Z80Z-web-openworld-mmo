@@ -221,7 +221,22 @@ export class GameLoop {
       if (now < enc.mobTurnScheduledAt) continue;
 
       const mob = this.mobSpawner.getMob(enc.mobId);
-      if (!mob) continue;
+      if (!mob) {
+        // Mob removed from the world while the encounter was active — release
+        // the player (defense-in-depth; the MobSpawner removal hook normally
+        // handles this first). endEncounterForMob returns undefined when the
+        // hook already released it, avoiding duplicate notifications.
+        const releasedPlayer = this.encounterSystem.endEncounterForMob(enc.mobId);
+        if (releasedPlayer) {
+          const client = this.room.clients.getById(releasedPlayer);
+          client?.send("combat_event", {
+            type: "encounter_fled",
+            sourceId: enc.mobId,
+            targetId: releasedPlayer,
+          });
+        }
+        continue;
+      }
 
       const player = this.room.state.players.get(enc.playerId);
       if (!player) continue;

@@ -1,5 +1,7 @@
 // ── Constants ──
 
+import { calculateDamage } from "./CombatSystem.js";
+
 export const TURN_TIMEOUT_MS = 12_000;
 export const FLEE_CHANCE = 0.6;
 export const DEFEND_DAMAGE_MULTIPLIER = 0.5;
@@ -187,7 +189,7 @@ export class EncounterSystem {
     params: CombatParams,
     now: number,
   ): ActionResult {
-    const damage = this.calculateDamage(params.attack, params.level, params.mobDefense);
+    const damage = calculateDamage(params.attack, params.level, params.mobDefense);
     encounter.mobHp = max(0, encounter.mobHp - damage);
 
     const events: CombatEvent[] = [
@@ -249,7 +251,7 @@ export class EncounterSystem {
     if (encounter.ended) return { events: [], error: "no_encounter" };
     if (encounter.turn !== "mob") return { events: [], error: "not_mob_turn" };
 
-    let damage = this.calculateDamage(params.mobAttack, params.mobLevel, params.playerDefense);
+    let damage = calculateDamage(params.mobAttack, params.mobLevel, params.playerDefense);
     if (encounter.playerDefending) {
       damage = Math.floor(damage * DEFEND_DAMAGE_MULTIPLIER);
       encounter.playerDefending = false;
@@ -317,13 +319,6 @@ export class EncounterSystem {
       ended: true,
       reason,
     };
-  }
-
-  /**
-   * Attempt atk×(1+level×0.1) − def. Floor to ≥1.
-   */
-  calculateDamage(atk: number, level: number, def: number): number {
-    return max(1, Math.floor(atk * (1 + level * 0.1)) - def);
   }
 }
 

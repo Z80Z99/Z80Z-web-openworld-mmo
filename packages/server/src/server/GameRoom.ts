@@ -24,9 +24,9 @@ import type Database from "better-sqlite3";
 import { Auth } from "./Auth.js";
 import { AOIManager } from "./AOI.js";
 import { GameLoop, createGameLoop } from "./GameLoop.js";
-import { CombatSystem, hasLeveledUp, rollLoot } from "./CombatSystem.js";
+import { CombatSystem } from "./CombatSystem.js";
 import { EncounterSystem, ENCOUNTER_ENGAGE_RANGE } from "./EncounterSystem.js";
-import { applyCombatEvents, sendEncounterEvent } from "./CombatEffects.js";
+import { applyCombatEvents, applyLevelUps, resolveMobKill, sendEncounterEvent } from "./CombatEffects.js";
 import { MobSpawner } from "./MobSpawner.js";
 import { QuestSystem } from "./QuestSystem.js";
 import { MovementSystem } from "./MovementSystem.js";
@@ -113,8 +113,19 @@ export class GameRoom extends Room<RoomState> {
     // Mount system
     this.mountSystem = new MountSystem(this.db);
 
-    // Mob spawner
-    this.mobSpawner = new MobSpawner(this.worldGen);
+    // Mob spawner — when AOI pruning removes a mob, release any encounter
+    // referencing it so the player's busy/combat state can never dangle.
+    this.mobSpawner = new MobSpawner(this.worldGen, (mobId) => {
+      const releasedPlayer = this.encounterSystem.endEncounterForMob(mobId);
+      if (releasedPlayer) {
+        const client = this.clients.getById(releasedPlayer);
+        client?.send("combat_event", {
+          type: "encounter_fled",
+          sourceId: mobId,
+          targetId: releasedPlayer,
+        });
+      }
+    });
 
     // Tile physics system (event-driven, processes when tiles change)
     this.tilePhysics = new TilePhysics(this.db);
@@ -732,29 +743,12 @@ export class GameRoom extends Room<RoomState> {
       // Sync XP to schema and apply any level-ups from this kill.
       const stats = this.combatSystem.getPlayerStats(client.sessionId);
       if (stats) {
-        while (hasLeveledUp(stats.xp, stats.xpToNextLevel)) {
-          stats.xp -= stats.xpToNextLevel;
-          player.level += 1;
-          stats.attack += 2;
-          stats.defense += 1;
-          stats.xpToNextLevel = 100 * player.level;
-          player.maxHealth += 20;
-          player.health = player.maxHealth;
-
-          const lvlClient = this.clients.getById(client.sessionId);
-          lvlClient?.send("combat_event", {
-            type: "level_up",
-            sourceId: client.sessionId,
-            targetId: client.sessionId,
-            level: player.level,
-            attack: stats.attack,
-            defense: stats.defense,
-            currentHp: player.health,
-            maxHp: player.maxHealth,
-          });
-        }
-        player.xp = stats.xp;
-        player.xpToNextLevel = stats.xpToNextLevel;
+        applyLevelUps({
+          room: this,
+          player,
+          playerStats: stats,
+          sessionId: client.sessionId,
+        });
       }
 
       // Begin turn-based encounter if mob survived and is within engage range.
@@ -824,6 +818,11 @@ export class GameRoom extends Room<RoomState> {
 
         // Apply encounter events
         for (const evt of result.events) {
+          // The terminal mob_killed from the state machine is NOT forwarded —
+          // resolveMobKill emits the single authoritative kill event below,
+          // otherwise the client would receive (and quest-report) it twice.
+          if (evt.type === "mob_killed") continue;
+
           if (evt.type === "damage_dealt" && typeof evt.damage === "number") {
             const entity = this.state.entities.get(mob.id);
             if (entity) entity.health = Math.max(0, mob.currentHp - evt.damage);
@@ -849,69 +848,19 @@ export class GameRoom extends Room<RoomState> {
           mob.patrolTarget = null;
 
           if (result.reason === "victory") {
-            mob.currentHp = 0;
-            mob.aiState = "dead";
-            mob.deathTime = Date.now();
-            const entity = this.state.entities.get(mob.id);
-            if (entity) entity.health = 0;
-
-            // XP + loot
-            const xpGain = mob.config.level * 10;
-            pStats.xp += xpGain;
-
-            sendEncounterEvent(this, client.sessionId, {
-              type: "mob_killed",
-              sourceId: client.sessionId,
-              targetId: mob.id,
+            resolveMobKill({
+              room: this,
+              player,
+              playerStats: pStats,
+              sessionId: client.sessionId,
+              mob,
+              getPlayerInventory: (playerId) => this.getPlayerInventory(playerId),
+              savePlayerInventory: (playerId, inv) => this.savePlayerInventory(playerId, inv),
+              getAuthData: (sid) => {
+                const c = this.clients.getById(sid);
+                return c ? (c as any).authData as ClientAuthData | undefined : undefined;
+              },
             });
-            sendEncounterEvent(this, client.sessionId, {
-              type: "xp_gained",
-              sourceId: client.sessionId,
-              targetId: mob.id,
-              xp: xpGain,
-            });
-
-            const loot = rollLoot(mob.config.lootTable);
-            if (loot.length > 0) {
-              const authData = (client as any).authData as ClientAuthData | undefined;
-              if (authData?.playerId) {
-                const inventory = this.getPlayerInventory(authData.playerId);
-                for (const itemId of loot) {
-                  inventory.set(itemId, (inventory.get(itemId) ?? 0) + 1);
-                }
-                this.savePlayerInventory(authData.playerId, inventory);
-              }
-              sendEncounterEvent(this, client.sessionId, {
-                type: "loot_dropped",
-                sourceId: client.sessionId,
-                targetId: mob.id,
-                loot,
-              });
-            }
-
-            // Level-ups
-            while (hasLeveledUp(pStats.xp, pStats.xpToNextLevel)) {
-              pStats.xp -= pStats.xpToNextLevel;
-              player.level += 1;
-              pStats.attack += 2;
-              pStats.defense += 1;
-              pStats.xpToNextLevel = 100 * player.level;
-              player.maxHealth += 20;
-              player.health = player.maxHealth;
-
-              sendEncounterEvent(this, client.sessionId, {
-                type: "level_up",
-                sourceId: client.sessionId,
-                targetId: client.sessionId,
-                level: player.level,
-                attack: pStats.attack,
-                defense: pStats.defense,
-                currentHp: player.health,
-                maxHp: player.maxHealth,
-              });
-            }
-            player.xp = pStats.xp;
-            player.xpToNextLevel = pStats.xpToNextLevel;
           }
 
           if (result.reason === "player_died") {
