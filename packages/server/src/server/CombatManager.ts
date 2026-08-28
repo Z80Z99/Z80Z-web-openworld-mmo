@@ -4,6 +4,7 @@ import type {
   CombatState,
   CombatManagerError,
   CombatStatsProvider,
+  CombatAction,
   DamageResult,
 } from "@mmo/shared";
 import { calculateDamage } from "./CombatSystem.js";
@@ -297,10 +298,11 @@ export class CombatManager {
    */
   applyAttack(
     combatId: string,
-    attackerId: string,
-    targetId: string,
+    action: CombatAction,
     statsProvider: CombatStatsProvider,
   ): { readonly result: DamageResult } | CombatFailure {
+    const attackerId = action.actorId;
+    const targetId = action.targetId;
     // 1. Combat exists
     const session = this.sessions.get(combatId);
     if (!session) return { error: "COMBAT_NOT_FOUND" };

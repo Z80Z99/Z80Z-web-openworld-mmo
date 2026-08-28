@@ -73,7 +73,7 @@ describe("Phase 3E-4: Cleanup / Respawn Fixes", () => {
     ]);
 
     // Kill player
-    combatManager.applyAttack("combat-1", "e1", "p1", {
+    combatManager.applyAttack("combat-1", { actorId: "e1", targetId: "p1", actionType: "ATTACK" }, {
       getStats: (id) => id === "e1" ? { attack: 20, defense: 5, level: 1 } : { attack: 10, defense: 3, level: 1 },
     });
 

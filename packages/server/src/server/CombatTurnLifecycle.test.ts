@@ -271,7 +271,7 @@ describe("Combat turn lifecycle (Phase 3D-3)", () => {
     manager.advanceTurn("combat-1");
 
     // Now e1 attacks p1 (lethal)
-    manager.applyAttack("combat-1", "e1", "p1", statsProvider);
+    manager.applyAttack("combat-1", { actorId: "e1", targetId: "p1", actionType: "ATTACK" }, statsProvider);
 
     // After p1 dies, turn should advance to next alive (back to e1)
     const session = getSession(manager, "combat-1");

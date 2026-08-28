@@ -379,7 +379,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     const { statsProvider } = createDuelSession(manager);
 
     // calculateDamage(10, 1, 3) = 10 * (1 + 0.1) - 3 = 11 - 3 = 8
-    const r = resultOf(manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider));
+    const r = resultOf(manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, statsProvider));
     expect(r.damage).toBe(8);
     expect(r.remainingHp).toBe(92);
     expect(r.targetKilled).toBe(false);
@@ -394,7 +394,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     });
 
     // calculateDamage(1, 1, 100) = 1 * 1.1 - 100 = -98.9 → max(1, -99) = 1
-    const r = resultOf(manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider));
+    const r = resultOf(manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, statsProvider));
     expect(r.damage).toBe(1);
     expect(r.remainingHp).toBe(99);
   });
@@ -409,7 +409,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     });
 
     // High damage vs low HP target
-    const r = resultOf(manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider));
+    const r = resultOf(manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, statsProvider));
     expect(r.remainingHp).toBe(0);
     expect(r.remainingHp).toBeGreaterThanOrEqual(0);
   });
@@ -422,7 +422,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
       e1Hp: 1,
     });
 
-    const r = resultOf(manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider));
+    const r = resultOf(manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, statsProvider));
     expect(r.remainingHp).toBe(0);
   });
 
@@ -434,7 +434,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
       e1Hp: 1,
     });
 
-    manager.applyAttack("combat-1", "player-1", "enemy-1", makeStatsProvider({
+    manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, makeStatsProvider({
       "player-1": { attack: 100, defense: 0, level: 10 },
       "enemy-1": { attack: 1, defense: 0, level: 1 },
     }));
@@ -455,14 +455,14 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     });
 
     // Kill the target first
-    manager.applyAttack("combat-1", "player-1", "enemy-1", makeStatsProvider({
+    manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, makeStatsProvider({
       "player-1": { attack: 100, defense: 0, level: 10 },
       "enemy-1": { attack: 1, defense: 0, level: 1 },
     }));
 
     // Turn advances to enemy-1, but enemy is dead, so turn skips to player-1
     // Now try to attack the dead enemy again
-    const r = manager.applyAttack("combat-1", "player-1", "enemy-1", makeStatsProvider({
+    const r = manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, makeStatsProvider({
       "player-1": { attack: 10, defense: 5, level: 1 },
       "enemy-1": { attack: 8, defense: 3, level: 1 },
     }));
@@ -497,7 +497,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
       combatParticipant("e1", { side: "enemy", currentHp: 100, maxHp: 100, initiative: 5 }),
     ]);
 
-    const r = manager2.applyAttack("c1", "p1", "e1", statsProvider);
+    const r = manager2.applyAttack("c1", { actorId: "p1", targetId: "e1", actionType: "ATTACK" }, statsProvider);
     expect(r).toEqual({ error: "ATTACKER_NOT_ALIVE" });
   });
 
@@ -507,7 +507,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     const { statsProvider } = createDuelSession(manager);
 
     // player-1 is currentActor, enemy-1 tries to attack
-    const r = manager.applyAttack("combat-1", "enemy-1", "player-1", statsProvider);
+    const r = manager.applyAttack("combat-1", { actorId: "enemy-1", targetId: "player-1", actionType: "ATTACK" }, statsProvider);
     expect(r).toEqual({ error: "NOT_CURRENT_ACTOR" });
   });
 
@@ -516,7 +516,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     const manager = new CombatManager();
     const { statsProvider } = createDuelSession(manager);
 
-    const r = manager.applyAttack("combat-1", "player-1", "player-1", statsProvider);
+    const r = manager.applyAttack("combat-1", { actorId: "player-1", targetId: "player-1", actionType: "ATTACK" }, statsProvider);
     expect(r).toEqual({ error: "SELF_ATTACK_REJECTED" });
   });
 
@@ -537,7 +537,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
       "p2": { attack: 8, defense: 3, level: 1 },
     });
 
-    const r = manager.applyAttack("combat-1", "p1", "p2", statsProvider);
+    const r = manager.applyAttack("combat-1", { actorId: "p1", targetId: "p2", actionType: "ATTACK" }, statsProvider);
     expect(r).toEqual({ error: "FRIENDLY_FIRE_REJECTED" });
   });
 
@@ -561,7 +561,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     });
 
     // Target e2 specifically
-    const r = resultOf(manager.applyAttack("combat-1", "p1", "e2", statsProvider));
+    const r = resultOf(manager.applyAttack("combat-1", { actorId: "p1", targetId: "e2", actionType: "ATTACK" }, statsProvider));
     expect(r.targetId).toBe("e2");
     expect(r.remainingHp).toBeLessThan(50);
 
@@ -577,7 +577,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     const { statsProvider } = createDuelSession(manager);
 
     // Player attacks enemy
-    manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider);
+    manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, statsProvider);
 
     const session = manager.getCombatSession("combat-1")!;
     expect(session.currentActorId).toBe("enemy-1");
@@ -603,12 +603,12 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     });
 
     // p1 attacks e1
-    manager.applyAttack("combat-1", "p1", "e1", statsProvider);
+    manager.applyAttack("combat-1", { actorId: "p1", targetId: "e1", actionType: "ATTACK" }, statsProvider);
     const s1 = manager.getCombatSession("combat-1")!;
     expect(s1.currentActorId).toBe("p2");
 
     // p2 attacks e1
-    manager.applyAttack("combat-1", "p2", "e1", statsProvider);
+    manager.applyAttack("combat-1", { actorId: "p2", targetId: "e1", actionType: "ATTACK" }, statsProvider);
     const s2 = manager.getCombatSession("combat-1")!;
     // Turn wraps to e1 (or resolves if dead)
     expect(["e1", "p1"]).toContain(s2.currentActorId);
@@ -634,12 +634,12 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     });
 
     // p1 attacks e1
-    manager.applyAttack("combat-1", "p1", "e1", statsProvider);
+    manager.applyAttack("combat-1", { actorId: "p1", targetId: "e1", actionType: "ATTACK" }, statsProvider);
     const s1 = manager.getCombatSession("combat-1")!;
     expect(s1.currentActorId).toBe("e1");
 
     // e1 attacks p1
-    manager.applyAttack("combat-1", "e1", "p1", statsProvider);
+    manager.applyAttack("combat-1", { actorId: "e1", targetId: "p1", actionType: "ATTACK" }, statsProvider);
     const s2 = manager.getCombatSession("combat-1")!;
     expect(s2.currentActorId).toBe("e2");
   });
@@ -666,9 +666,9 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     });
 
     // p1 → e1
-    manager.applyAttack("combat-1", "p1", "e1", statsProvider);
+    manager.applyAttack("combat-1", { actorId: "p1", targetId: "e1", actionType: "ATTACK" }, statsProvider);
     // p2 → e2
-    manager.applyAttack("combat-1", "p2", "e2", statsProvider);
+    manager.applyAttack("combat-1", { actorId: "p2", targetId: "e2", actionType: "ATTACK" }, statsProvider);
 
     const session = manager.getCombatSession("combat-1")!;
     // After p2 attacks, turn should be on e1 (next alive enemy)
@@ -680,7 +680,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     const manager = new CombatManager();
     const { statsProvider } = createDuelSession(manager);
 
-    const r = resultOf(manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider));
+    const r = resultOf(manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, statsProvider));
 
     // Verify against direct calculation
     const expected = calculateDamage(10, 1, 3); // attack=10, level=1, defense=3
@@ -704,7 +704,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     const beforeSession = manager.getCombatSession("combat-1")!;
     const beforeHp = beforeSession.participants.find((p) => p.participantId === "enemy-1")!.currentHp;
 
-    manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider);
+    manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, statsProvider);
 
     const afterSession = manager.getCombatSession("combat-1")!;
     const afterHp = afterSession.participants.find((p) => p.participantId === "enemy-1")!.currentHp;
@@ -719,7 +719,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     const manager = new CombatManager();
     const { statsProvider } = createDuelSession(manager);
 
-    const r = resultOf(manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider));
+    const r = resultOf(manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, statsProvider));
     const fresh = manager.getCombatSession("combat-1")!;
 
     // Result has remainingHp, fresh session has updated state
@@ -740,7 +740,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
     const before = manager.getCombatSession("combat-1")!;
     expect(before.currentActorId).toBe("player-1");
 
-    manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider);
+    manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, statsProvider);
 
     const after = manager.getCombatSession("combat-1")!;
     expect(after.currentActorId).toBe("enemy-1");
@@ -751,7 +751,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
   it("DM-021: applyAttack on nonexistent combat returns error", () => {
     const manager = new CombatManager();
     const statsProvider = makeStatsProvider({});
-    const r = manager.applyAttack("nonexistent", "a", "b", statsProvider);
+    const r = manager.applyAttack("nonexistent", { actorId: "a", targetId: "b", actionType: "ATTACK" }, statsProvider);
     expect(r).toEqual({ error: "COMBAT_NOT_FOUND" });
   });
 
@@ -765,7 +765,7 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
       "player-1": { attack: 10, defense: 5, level: 1 },
       "enemy-1": { attack: 8, defense: 3, level: 1 },
     });
-    const r = manager.applyAttack("combat-1", "player-1", "enemy-1", statsProvider);
+    const r = manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, statsProvider);
     expect(r).toEqual({ error: "COMBAT_NOT_ACTIVE" });
   });
 });

@@ -281,8 +281,7 @@ export class BattleCombatBridge {
     // 4. Delegate to CombatManager
     const attackResult = this.combatManager.applyAttack(
       combatId,
-      attackerId,
-      targetId,
+      { actorId: attackerId, targetId: targetId, actionType: "ATTACK" },
       statsProvider,
     );
     if ("error" in attackResult) return { error: attackResult.error };
