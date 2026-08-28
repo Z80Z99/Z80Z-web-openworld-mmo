@@ -176,6 +176,12 @@ export interface CombatParticipantState {
   readonly initiative: number;
   /** Whether this participant is alive and can act. */
   readonly alive: boolean;
+  /**
+   * FLEEING marker. alive=true + fleeing=true = FLEEING; alive=false = DEAD.
+   * FLEEING participants are excluded from turnOrder but may rejoin later.
+   * DEAD participants can never rejoin. Omitted in snapshots defaults to false.
+   */
+  readonly fleeing?: boolean;
   /** Whether this participant is defending (reduces incoming damage). */
   readonly defending: boolean;
   /** Which side this participant belongs to (for敌对 validation). */
@@ -252,6 +258,7 @@ export type CombatManagerError =
   | "INVALID_BATTLE_ID"
   | "PARTICIPANT_NOT_FOUND"
   | "PARTICIPANT_ALREADY_IN_COMBAT"
+  | "PARTICIPANT_NOT_ALIVE"
   | "COMBAT_NOT_ACTIVE"
   | "NO_ALIVE_PARTICIPANTS"
   | "TARGET_NOT_ALIVE"

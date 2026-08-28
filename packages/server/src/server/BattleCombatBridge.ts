@@ -383,6 +383,7 @@ export class BattleCombatBridge {
     const result = this.combatManager.addPendingCombatParticipant(combatId, {
       ...combatParticipant,
       id: combatParticipant.participantId,
+      fleeing: false,
     });
     if ("error" in result) {
       return { error: "COMBAT_CREATION_FAILED" };
@@ -395,9 +396,12 @@ export class BattleCombatBridge {
   }
 
   /**
-   * MF3-021: Sync FLEEING state from BattleManager to CombatManager.
-   * Reads battle participant states and removes FLEEING participants
-   * from the combat turn order.
+   * MF3-021 / Bug #1+#3: Sync FLEEING state from BattleManager to CombatManager.
+   * Reads battle participant states and marks matching combat participants as
+   * FLEEING. Covers both turnOrder members (removed from rotation) and pending
+   * members (kept queued — flushPendingParticipants skips them until rejoin).
+   * Idempotent: repeated calls converge (setParticipantFleeing is a no-op for
+   * already-fleeing participants, FR-011).
    */
   syncFleeingState(battleId: string): BridgeResult {
     const combatId = this.combatManager.getCombatIdByBattle(battleId);
@@ -421,16 +425,63 @@ export class BattleCombatBridge {
       ...battle.enemySide.participants,
     ];
 
-    // Find FLEEING participants that are still in combat turnOrder
+    // Mark every combat participant whose battle state is FLEEING.
+    // setParticipantFleeing handles turnOrder removal, pending retention and
+    // current-actor advancement (Case B — no premature round++/flush).
     for (const bp of allBattleParticipants) {
       if (bp.state === "FLEEING") {
         const inCombat = combatSession.participants.some(
           (p) => p.participantId === bp.id,
         );
-        const inTurnOrder = combatSession.turnOrder.includes(bp.id);
-        if (inCombat && inTurnOrder) {
+        if (inCombat) {
           this.combatManager.setParticipantFleeing(combatId, bp.id);
         }
+      }
+    }
+
+    const finalSession = this.combatManager.getCombatSession(combatId);
+    if (!finalSession) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+    return { session: finalSession };
+  }
+
+  /**
+   * Bug #1 fix: Sync REJOIN state from BattleManager to CombatManager.
+   * For every combat participant marked FLEEING whose battle participant state
+   * is back to ACTIVE (battle-side FLEEING → ACTIVE rejoin), call
+   * rejoinCombatParticipant so turn eligibility is restored at the next round
+   * boundary. Idempotent: repeated calls converge (FR-012).
+   */
+  syncRejoinState(battleId: string): BridgeResult {
+    const combatId = this.combatManager.getCombatIdByBattle(battleId);
+    if (!combatId) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+
+    const battle = this.battleManager.getBattle(battleId);
+    if (!battle) {
+      return { error: "BATTLE_NOT_FOUND" };
+    }
+
+    const combatSession = this.combatManager.getCombatSession(combatId);
+    if (!combatSession) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+
+    // Battle participant state by id
+    const battleStateById = new Map<string, string>();
+    for (const p of [
+      ...battle.playerSide.participants,
+      ...battle.enemySide.participants,
+    ]) {
+      battleStateById.set(p.id, p.state);
+    }
+
+    // Rejoin fleeing combat participants whose battle state is ACTIVE again
+    for (const cp of combatSession.participants) {
+      if (cp.fleeing && battleStateById.get(cp.participantId) === "ACTIVE") {
+        this.combatManager.rejoinCombatParticipant(combatId, cp.participantId);
       }
     }
 
@@ -493,6 +544,7 @@ export class BattleCombatBridge {
         const addResult = this.combatManager.addPendingCombatParticipant(combatId, {
           ...participant,
           id: participant.participantId,
+          fleeing: false,
         });
         if ("error" in addResult) {
           return { error: "COMBAT_CREATION_FAILED" };

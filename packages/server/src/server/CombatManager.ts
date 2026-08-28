@@ -17,6 +17,8 @@ type MutableCombatParticipant = {
   maxHp: number;
   initiative: number;
   alive: boolean;
+  /** FLEEING marker — alive=true + fleeing=true = FLEEING; alive=false = DEAD. */
+  fleeing: boolean;
   defending: boolean;
   side: "player" | "enemy";
 };
@@ -59,6 +61,7 @@ function toSnapshotSession(session: MutableCombatSession): CombatSession {
       currentHp: p.currentHp,
       initiative: p.initiative,
       alive: p.alive,
+      fleeing: p.fleeing,
       defending: p.defending,
       side: p.side,
     })),
@@ -144,6 +147,7 @@ export class CombatManager {
         maxHp: p.maxHp,
         initiative: p.initiative,
         alive: p.alive,
+        fleeing: p.fleeing ?? false,
         defending: p.defending,
         side: p.side,
       }),
@@ -264,6 +268,7 @@ export class CombatManager {
       maxHp: participant.maxHp,
       initiative: participant.initiative,
       alive: participant.alive,
+      fleeing: participant.fleeing ?? false,
       defending: participant.defending,
       side: participant.side,
     });
@@ -308,6 +313,7 @@ export class CombatManager {
       currentHp: participant.currentHp,
       initiative: participant.initiative,
       alive: participant.alive,
+      fleeing: participant.fleeing ?? false,
       defending: participant.defending,
       side: participant.side,
     };
@@ -329,6 +335,7 @@ export class CombatManager {
       currentHp: p.currentHp,
       initiative: p.initiative,
       alive: p.alive,
+      fleeing: p.fleeing,
       defending: p.defending,
       side: p.side,
     }));
@@ -353,6 +360,13 @@ export class CombatManager {
     const tIndex = session.turnOrder.indexOf(participantId);
     if (tIndex !== -1) session.turnOrder.splice(tIndex, 1);
     this.participantIndex.delete(participantId);
+
+    // Bug #3: also remove from the pending queue so a departed participant is
+    // never flushed back into turnOrder ("left battle" must not flush).
+    const pendingIndex = session.pendingParticipants.findIndex(
+      (p) => p.participantId === participantId,
+    );
+    if (pendingIndex !== -1) session.pendingParticipants.splice(pendingIndex, 1);
 
     // If removed participant was current actor, advance to next alive
     if (session.currentActorId === participantId) {
@@ -446,6 +460,7 @@ export class CombatManager {
     const targetKilled = target.currentHp === 0;
     if (targetKilled) {
       target.alive = false;
+      target.fleeing = false; // DEAD strictly clears FLEEING — FLEEING ≠ DEAD (FR-009)
       target.defending = false;
     }
 
@@ -561,12 +576,12 @@ export class CombatManager {
       return;
     }
 
-    // Find current index
-    let currentIndex = turnOrder.indexOf(session.currentActorId);
-    if (currentIndex === -1) {
-      // currentActorId not in turnOrder — find first alive
-      currentIndex = -1;
-    }
+    // Case A: current actor still present in turnOrder → normal wrap detection.
+    // Case B: current actor was removed before advancing (flee / death / removal)
+    //         → indexOf === -1. No cycle boundary was crossed, so round MUST NOT
+    //         increment and pending MUST NOT be flushed mid-round.
+    const currentIndex = turnOrder.indexOf(session.currentActorId);
+    const currentActorPresent = currentIndex !== -1;
 
     // Try to find next alive participant
     let nextIndex = (currentIndex + 1) % turnOrder.length;
@@ -579,9 +594,13 @@ export class CombatManager {
       );
 
       if (participant && participant.alive) {
-        // Found next alive participant
-        // Only increment round when wrapping from non-zero to index 0
-        if (nextIndex === 0 && currentIndex !== 0) {
+        // Found next alive participant.
+        // Round boundary is crossed when advancing wraps past the end of the
+        // order (next index ≤ current index) — including the single-member
+        // case where every turn completes a cycle (enables pending flush).
+        // When the current actor was removed before advancing (Case B, index -1),
+        // no cycle boundary was crossed — no round++ and no premature pending flush.
+        if (currentActorPresent && nextIndex <= currentIndex) {
           session.round++;
           this.flushPendingParticipants(session);
         }
@@ -619,8 +638,16 @@ export class CombatManager {
   }
 
   /**
-   * MF3-021: Mark a participant as fleeing — remove from turnOrder.
-   * If the fleeing participant was the current actor, advance to next alive.
+   * MF3-021 / Bug #1+#2+#3: Mark a participant as FLEEING.
+   *
+   * - Sets `fleeing = true` (alive stays true — FLEEING ≠ DEAD, FR-009).
+   * - Removes the participant from turnOrder (FR-013: FLEEING never in turnOrder).
+   * - Pending participants keep their pending+FLEEING state — flushPendingParticipants
+   *   skips them until rejoin (Bug #3, FR-007).
+   * - If the fleeing participant was the current actor, advance to the next alive
+   *   participant WITHOUT a premature round++ / pending flush (Bug #2 — handled by
+   *   advanceToNextAlive's Case B).
+   * - Idempotent: re-fleeing an already-fleeing participant is a success no-op (FR-011).
    */
   setParticipantFleeing(
     combatId: string,
@@ -634,11 +661,18 @@ export class CombatManager {
     );
     if (!participant) return { error: "PARTICIPANT_NOT_FOUND" };
 
-    // Remove from turnOrder (fleeing = excluded from rotation)
+    // Idempotent no-op (FR-011)
+    if (participant.fleeing) {
+      return { session: toSnapshotSession(session) };
+    }
+
+    participant.fleeing = true;
+
+    // Remove from turnOrder (FLEEING = excluded from rotation)
     const tIndex = session.turnOrder.indexOf(participantId);
     if (tIndex !== -1) session.turnOrder.splice(tIndex, 1);
 
-    // If current actor fled, advance to next
+    // If current actor fled, advance to next alive (Case B — no round++/flush)
     if (session.currentActorId === participantId) {
       this.advanceToNextAlive(session);
     }
@@ -647,23 +681,81 @@ export class CombatManager {
   }
 
   /**
-   * Move pending participants into active combat turn order.
+   * Bug #1 fix: Restore a FLEEING combat participant's turn eligibility.
+   *
+   * Rejoin semantics:
+   * - Participant must exist and be alive (DEAD can never rejoin — FR-010).
+   * - Idempotent: rejoin on a non-fleeing participant is a success no-op (FR-012).
+   * - The participant returns to the PENDING queue — NOT directly to turnOrder.
+   *   Turn eligibility is restored at the next round boundary via
+   *   flushPendingParticipants, so the rejoiner never steals the current turn (FR-004).
+   * - HP / initiative / defending are preserved (FR-002 / FR-003).
+   */
+  rejoinCombatParticipant(
+    combatId: string,
+    participantId: string,
+  ): CombatResult {
+    const session = this.sessions.get(combatId);
+    if (!session) return { error: "COMBAT_NOT_FOUND" };
+    if (session.state !== "ACTIVE") return { error: "COMBAT_NOT_ACTIVE" };
+
+    const participant = session.participants.find(
+      (p) => p.participantId === participantId,
+    );
+    if (!participant) return { error: "PARTICIPANT_NOT_FOUND" };
+    if (!participant.alive) return { error: "PARTICIPANT_NOT_ALIVE" };
+
+    // Idempotent no-op when already active (FR-012)
+    if (!participant.fleeing) {
+      return { session: toSnapshotSession(session) };
+    }
+
+    participant.fleeing = false;
+
+    // Rejoin enters the pending queue — never mid-turn (FR-004)
+    if (
+      !session.pendingParticipants.some((p) => p.participantId === participantId)
+    ) {
+      session.pendingParticipants.push(participant);
+    }
+
+    return { session: toSnapshotSession(session) };
+  }
+
+  /**
+   * Move eligible pending participants into active combat turn order.
    * Called at round boundaries (inside advanceToNextAlive).
+   *
+   * Bug #3: Only pending participants that are alive AND not fleeing are
+   * flushed. FLEEING / DEAD pending stay stably queued — they are NOT deleted
+   * here; they rejoin via rejoinCombatParticipant or are removed by
+   * syncParticipants / battle cleanup. This keeps pendingParticipants and
+   * CombatParticipant state consistent.
    */
   private flushPendingParticipants(session: MutableCombatSession): void {
     if (session.pendingParticipants.length === 0) return;
 
-    // Add to turnOrder (participants are already in participants list from addPendingCombatParticipant)
+    const flushedIds: string[] = [];
     for (const p of session.pendingParticipants) {
-      session.turnOrder.push(p.participantId);
-      this.participantIndex.set(p.participantId, session.id);
+      if (p.alive && !p.fleeing) {
+        flushedIds.push(p.participantId);
+      }
+    }
+    if (flushedIds.length === 0) return;
+
+    // Add to turnOrder (participants are already in participants list from addPendingCombatParticipant)
+    for (const id of flushedIds) {
+      session.turnOrder.push(id);
+      this.participantIndex.set(id, session.id);
     }
 
     // Re-sort turnOrder by initiative descending
     const initMap = new Map(session.participants.map((p) => [p.participantId, p.initiative]));
     session.turnOrder.sort((a, b) => (initMap.get(b) ?? 0) - (initMap.get(a) ?? 0));
 
-    // Clear pending
-    session.pendingParticipants = [];
+    // Remove only flushed from pending; keep fleeing/dead pending queued
+    session.pendingParticipants = session.pendingParticipants.filter(
+      (p) => !flushedIds.includes(p.participantId),
+    );
   }
 }
