@@ -199,6 +199,8 @@ export interface CombatSession {
   readonly turnStartedAt: number | null;
   /** Maximum duration (ms) for a single turn. null means no timeout. */
   readonly turnTimeoutMs: number | null;
+  /** Participants waiting to join the combat session. */
+  readonly pendingParticipants: readonly CombatParticipantState[];
 }
 
 /* ── Phase 3D-2A: Combat Damage Result Pipeline ── */

@@ -361,17 +361,22 @@ export class BattleCombatBridge {
       ...this.buildCombatParticipants(battle.enemySide.participants, hpProvider, "enemy"),
     ];
 
-    // 3. Add missing participants
+    // 3. Add missing participants as pending (queued for next round boundary)
     const combatSession = this.combatManager.getCombatSession(combatId);
     if (!combatSession) {
       return { error: "COMBAT_CREATION_FAILED" };
     }
 
     const existingIds = new Set(combatSession.participants.map((p) => p.participantId));
+    const pendingParticipants = this.combatManager.getPendingParticipants(combatId);
+    const pendingIds = new Set(pendingParticipants.map((p) => p.participantId));
 
     for (const participant of eligibleParticipants) {
-      if (!existingIds.has(participant.participantId)) {
-        const addResult = this.combatManager.addCombatParticipant(combatId, participant);
+      if (!existingIds.has(participant.participantId) && !pendingIds.has(participant.participantId)) {
+        const addResult = this.combatManager.addPendingCombatParticipant(combatId, {
+          ...participant,
+          id: participant.participantId,
+        });
         if ("error" in addResult) {
           return { error: "COMBAT_CREATION_FAILED" };
         }

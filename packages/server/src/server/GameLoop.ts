@@ -9,7 +9,7 @@ import { EncounterSystem, MOB_TURN_DELAY_MS } from "./EncounterSystem.js";
 import { MobSpawner } from "./MobSpawner.js";
 import { BattleManager } from "./BattleManager.js";
 import { CombatManager } from "./CombatManager.js";
-import { BattleCombatBridge } from "./BattleCombatBridge.js";
+import { BattleCombatBridge, type HpProvider } from "./BattleCombatBridge.js";
 
 /**
  * Server-side game loop running at 20 Hz.
@@ -183,6 +183,26 @@ export class GameLoop {
         state: "ACTIVE",
         entityType: "mob",
       });
+    }
+
+    // Sync new battle participants into combat sessions (as pending)
+    for (const [battleId] of this.battleManager.getBattles()) {
+      const combatId = this.combatManager.getCombatIdByBattle(battleId);
+      if (!combatId) continue;
+      const session = this.combatManager.getCombatSession(combatId);
+      if (!session || session.state !== "ACTIVE") continue;
+
+      // Build HpProvider from room state
+      const hpProvider: HpProvider = {
+        getHp: (entityId: string) => {
+          const player = this.room.state.players.get(entityId);
+          if (player) return { currentHp: player.health, maxHp: player.maxHealth };
+          const mob = this.mobSpawner.getMob(entityId);
+          if (mob) return { currentHp: mob.currentHp, maxHp: mob.maxHp };
+          return undefined;
+        },
+      };
+      this.bridge.syncParticipants(battleId, hpProvider);
     }
   }
 

@@ -31,6 +31,7 @@ type MutableCombatSession = {
   participants: MutableCombatParticipant[];
   turnStartedAt: number | null;
   turnTimeoutMs: number | null;
+  pendingParticipants: MutableCombatParticipant[];
 };
 
 /* ── Result types ── */
@@ -52,6 +53,15 @@ function toSnapshotSession(session: MutableCombatSession): CombatSession {
     participants: session.participants.map((p) => ({ ...p })),
     turnStartedAt: session.turnStartedAt,
     turnTimeoutMs: session.turnTimeoutMs,
+    pendingParticipants: session.pendingParticipants.map((p) => ({
+      participantId: p.participantId,
+      maxHp: p.maxHp,
+      currentHp: p.currentHp,
+      initiative: p.initiative,
+      alive: p.alive,
+      defending: p.defending,
+      side: p.side,
+    })),
   };
 }
 
@@ -153,6 +163,7 @@ export class CombatManager {
       participants: mutableParticipants,
       turnStartedAt: Date.now(),
       turnTimeoutMs: timeoutMs ?? null,
+      pendingParticipants: [],
     };
 
     // Store and index
@@ -239,9 +250,62 @@ export class CombatManager {
       side: participant.side,
     });
     session.turnOrder.push(participant.participantId);
+    // Re-sort turnOrder by initiative descending to maintain correct ordering
+    const initMap = new Map(session.participants.map((p) => [p.participantId, p.initiative]));
+    session.turnOrder.sort((a, b) => (initMap.get(b) ?? 0) - (initMap.get(a) ?? 0));
     this.participantIndex.set(participant.participantId, combatId);
 
     return { session: toSnapshotSession(session) };
+  }
+
+  /**
+   * Add a participant to the pending queue.
+   * Pending participants are flushed into active combat at the next round boundary.
+   */
+  addPendingCombatParticipant(
+    combatId: string,
+    participant: Omit<MutableCombatParticipant, "id"> & { id: string },
+  ): CombatResult {
+    const session = this.sessions.get(combatId);
+    if (!session) return { error: "COMBAT_NOT_FOUND" };
+    if (session.state !== "ACTIVE") return { error: "COMBAT_NOT_ACTIVE" };
+
+    // Check for duplicate in active participants
+    if (session.participants.some((p) => p.participantId === participant.id)) {
+      return { error: "PARTICIPANT_ALREADY_IN_COMBAT" };
+    }
+    // Check for duplicate in pending queue
+    if (session.pendingParticipants.some((p) => p.participantId === participant.id)) {
+      return { error: "PARTICIPANT_ALREADY_IN_COMBAT" };
+    }
+
+    // Add to pending, NOT to turnOrder
+    session.pendingParticipants.push({
+      participantId: participant.id,
+      maxHp: participant.maxHp,
+      currentHp: participant.currentHp,
+      initiative: participant.initiative,
+      alive: participant.alive,
+      defending: participant.defending,
+      side: participant.side,
+    });
+
+    return { session: toSnapshotSession(session) };
+  }
+
+  /** Get pending participants for a combat session (public for test visibility). */
+  getPendingParticipants(combatId: string): readonly CombatParticipantState[] {
+    const session = this.sessions.get(combatId);
+    if (!session) return [];
+    return session.pendingParticipants.map((p) => ({
+      participantId: p.participantId,
+      maxHp: p.maxHp,
+      currentHp: p.currentHp,
+      initiative: p.initiative,
+      alive: p.alive,
+      defending: p.defending,
+      side: p.side,
+    }));
   }
 
   /** Remove a participant from a combat session. */
@@ -489,6 +553,7 @@ export class CombatManager {
         // Only increment round when wrapping from non-zero to index 0
         if (nextIndex === 0 && currentIndex !== 0) {
           session.round++;
+          this.flushPendingParticipants(session);
         }
         session.currentActorId = participantId;
         session.turnStartedAt = Date.now();
@@ -502,5 +567,29 @@ export class CombatManager {
 
     // No alive participants found
     session.state = "RESOLVED";
+  }
+
+  /**
+   * Move pending participants into active combat.
+   * Called at round boundaries (inside advanceToNextAlive).
+   */
+  private flushPendingParticipants(session: MutableCombatSession): void {
+    if (session.pendingParticipants.length === 0) return;
+
+    // Move pending to participants
+    session.participants.push(...session.pendingParticipants);
+
+    // Add to turnOrder
+    for (const p of session.pendingParticipants) {
+      session.turnOrder.push(p.participantId);
+      this.participantIndex.set(p.participantId, session.id);
+    }
+
+    // Re-sort turnOrder by initiative descending
+    const initMap = new Map(session.participants.map((p) => [p.participantId, p.initiative]));
+    session.turnOrder.sort((a, b) => (initMap.get(b) ?? 0) - (initMap.get(a) ?? 0));
+
+    // Clear pending
+    session.pendingParticipants = [];
   }
 }

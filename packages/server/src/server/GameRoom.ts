@@ -41,6 +41,7 @@ import { IdleSystem } from "./IdleSystem.js";
 import { BattleManager } from "./BattleManager.js";
 import { CombatManager } from "./CombatManager.js";
 import { BattleCombatBridge } from "./BattleCombatBridge.js";
+import { RoomWorldHealthWriter } from "./RoomWorldHealthWriter.js";
 
 export const GAME_ROOM_CAPACITY = 100;
 
@@ -159,7 +160,7 @@ export class GameRoom extends Room<RoomState> {
     // Battle manager (Dynamic Battle Area runtime)
     this.battleManager = new BattleManager();
     this.combatManager = new CombatManager();
-    this.battleCombatBridge = new BattleCombatBridge(this.battleManager, this.combatManager);
+    this.battleCombatBridge = new BattleCombatBridge(this.battleManager, this.combatManager, new RoomWorldHealthWriter(this));
 
     // Start game loop
     this.gameLoop = createGameLoop(this, this.db, this.aoi, this.movementSystem, this.combatSystem, this.encounterSystem, this.mobSpawner, this.battleManager, this.combatManager, this.battleCombatBridge);

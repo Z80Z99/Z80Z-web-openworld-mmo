@@ -1332,9 +1332,14 @@ describe("World HP Synchronization (HP-001 to HP-020)", () => {
     const result = bridge.syncParticipants("battle-1", fullProvider);
     const session = sessionOf(result);
 
-    expect(session.participants.length).toBe(4);
-    expect(session.turnOrder).toContain("player-2");
-    expect(session.turnOrder).toContain("enemy-2");
+    // New participants go to pending queue (added at next round boundary)
+    expect(session.participants.length).toBe(2);
+    expect(session.pendingParticipants).toHaveLength(2);
+    expect(session.pendingParticipants.map((p) => p.participantId)).toContain("player-2");
+    expect(session.pendingParticipants.map((p) => p.participantId)).toContain("enemy-2");
+    // New participants are NOT in turnOrder yet
+    expect(session.turnOrder).not.toContain("player-2");
+    expect(session.turnOrder).not.toContain("enemy-2");
   });
 
   /* ── BC-F2-008: syncParticipants removes stale ── */

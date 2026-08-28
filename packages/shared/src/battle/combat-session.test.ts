@@ -38,6 +38,7 @@ function createTestSession(
     ],
     turnStartedAt: null,
     turnTimeoutMs: null,
+    pendingParticipants: [],
     ...overrides,
   };
 }
