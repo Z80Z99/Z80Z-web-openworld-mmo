@@ -5,6 +5,9 @@ import {
   type CombatSession,
   type CombatPoint,
   type ParticipantState,
+  type WorldHealthWriter,
+  type CombatStatsProvider,
+  type DamageResult,
 } from "@mmo/shared";
 import { describe, expect, it } from "vitest";
 import { BattleManager, type BattleManagerError } from "./BattleManager.js";
@@ -13,6 +16,7 @@ import {
   BattleCombatBridge,
   type BridgeError,
   type HpProvider,
+  type CombatActionBridgeResult,
 } from "./BattleCombatBridge.js";
 
 /* ── Helpers ── */
@@ -88,6 +92,45 @@ function hpMap(
       return map.get(id);
     },
   };
+}
+
+/* ── Phase 3D-2B: World HP Synchronization fixtures ── */
+
+function worldHpMap(
+  entries: Array<{ id: string; currentHp: number; maxHp: number }>,
+): WorldHealthWriter {
+  const map = new Map<string, { currentHp: number; maxHp: number }>();
+  for (const e of entries) map.set(e.id, { currentHp: e.currentHp, maxHp: e.maxHp });
+  return {
+    getHp(id: string) {
+      return map.get(id);
+    },
+    setHp(id: string, hp: number) {
+      const entry = map.get(id);
+      if (entry) entry.currentHp = Math.max(0, Math.min(hp, entry.maxHp));
+    },
+    isAlive(id: string) {
+      const entry = map.get(id);
+      return entry !== undefined && entry.currentHp > 0;
+    },
+  };
+}
+
+function statsMap(
+  entries: Array<{ id: string; attack: number; defense: number; level: number }>,
+): CombatStatsProvider {
+  const map = new Map(entries.map((e) => [e.id, e]));
+  return {
+    getStats(id: string) {
+      return map.get(id);
+    },
+  };
+}
+
+function damageOf(result: CombatActionBridgeResult): DamageResult {
+  expect(result).not.toHaveProperty("error");
+  if ("damage" in result) return result.damage;
+  return expect.fail(`Expected damage result, received ${(result as { error: string }).error}`);
 }
 
 /* ── Tests ── */
@@ -707,5 +750,391 @@ describe("BattleCombatBridge", () => {
 
     expect(bridge.getBattleId("combat-xyz")).toBe("battle-1");
     expect(bridge.getBattleId("nonexistent")).toBeUndefined();
+  });
+});
+
+/* ════════════════ Phase 3D-2B: World HP Synchronization ════════════════ */
+
+describe("World HP Synchronization (HP-001 to HP-020)", () => {
+  function setupDuel(opts: {
+    p1Hp?: number;
+    e1Hp?: number;
+    p1Attack?: number;
+    e1Defense?: number;
+  } = {}) {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const world = worldHpMap([
+      { id: "player-1", currentHp: opts.p1Hp ?? 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: opts.e1Hp ?? 100, maxHp: 100 },
+    ]);
+    const stats = statsMap([
+      { id: "player-1", attack: opts.p1Attack ?? 10, defense: 5, level: 1 },
+      { id: "enemy-1", attack: 8, defense: opts.e1Defense ?? 3, level: 1 },
+    ]);
+    const bridge = new BattleCombatBridge(bm, cm, world);
+
+    // Create battle
+    bm.createBattle(
+      "battle-1",
+      participant("player-1", point(0, 0)),
+      participant("enemy-1", point(1, 0)),
+    );
+
+    // Begin encounter
+    bridge.beginEncounter("battle-1", world as HpProvider);
+
+    return { bm, cm, world, stats, bridge };
+  }
+
+  /* ── HP-001: WorldHealthWriter.setHp updates stored HP ── */
+  it("HP-001: WorldHealthWriter.setHp updates stored HP", () => {
+    const world = worldHpMap([{ id: "p1", currentHp: 100, maxHp: 100 }]);
+    world.setHp("p1", 50);
+    expect(world.getHp("p1")?.currentHp).toBe(50);
+  });
+
+  /* ── HP-002: WorldHealthWriter.isAlive true when HP > 0 ── */
+  it("HP-002: WorldHealthWriter.isAlive true when HP > 0", () => {
+    const world = worldHpMap([{ id: "p1", currentHp: 50, maxHp: 100 }]);
+    expect(world.isAlive("p1")).toBe(true);
+  });
+
+  /* ── HP-003: WorldHealthWriter.isAlive false when HP = 0 ── */
+  it("HP-003: WorldHealthWriter.isAlive false when HP = 0", () => {
+    const world = worldHpMap([{ id: "p1", currentHp: 0, maxHp: 100 }]);
+    expect(world.isAlive("p1")).toBe(false);
+  });
+
+  /* ── HP-004: WorldHealthWriter.isAlive false when entity not found ── */
+  it("HP-004: WorldHealthWriter.isAlive false when entity not found", () => {
+    const world = worldHpMap([]);
+    expect(world.isAlive("nonexistent")).toBe(false);
+  });
+
+  /* ── HP-005: applyCombatAction writes remaining HP to World ── */
+  it("HP-005: applyCombatAction writes remaining HP to World after non-lethal attack", () => {
+    const { world, stats, bridge } = setupDuel({ e1Hp: 100 });
+
+    const dmg = damageOf(
+      bridge.applyCombatAction("battle-1", "player-1", "enemy-1", stats),
+    );
+
+    expect(dmg.remainingHp).toBeLessThan(100);
+    expect(world.getHp("enemy-1")?.currentHp).toBe(dmg.remainingHp);
+  });
+
+  /* ── HP-006: applyCombatAction writes HP=0 to World after lethal attack ── */
+  it("HP-006: applyCombatAction writes HP=0 to World after lethal attack", () => {
+    const { world, stats, bridge } = setupDuel({ p1Attack: 100, e1Hp: 1 });
+
+    const dmg = damageOf(
+      bridge.applyCombatAction("battle-1", "player-1", "enemy-1", stats),
+    );
+
+    expect(dmg.targetKilled).toBe(true);
+    expect(world.getHp("enemy-1")?.currentHp).toBe(0);
+  });
+
+  /* ── HP-007: applyCombatAction returns correct DamageResult ── */
+  it("HP-007: applyCombatAction returns correct DamageResult", () => {
+    const { stats, bridge } = setupDuel();
+
+    const dmg = damageOf(
+      bridge.applyCombatAction("battle-1", "player-1", "enemy-1", stats),
+    );
+
+    expect(dmg.attackerId).toBe("player-1");
+    expect(dmg.targetId).toBe("enemy-1");
+    expect(typeof dmg.damage).toBe("number");
+    expect(typeof dmg.remainingHp).toBe("number");
+    expect(typeof dmg.targetKilled).toBe("boolean");
+  });
+
+  /* ── HP-008: applyCombatAction rejects attack on dead target ── */
+  it("HP-008: applyCombatAction rejects attack on dead target (isAlive=false)", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const world = worldHpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 0, maxHp: 100 },
+    ]);
+    const stats = statsMap([
+      { id: "player-1", attack: 10, defense: 5, level: 1 },
+      { id: "enemy-1", attack: 8, defense: 3, level: 1 },
+    ]);
+    const bridge = new BattleCombatBridge(bm, cm, world);
+
+    bm.createBattle(
+      "battle-1",
+      participant("player-1", point(0, 0)),
+      participant("enemy-1", point(1, 0)),
+    );
+
+    // Manually create combat with dead enemy
+    bridge.beginEncounter("battle-1", {
+      getHp(id: string) {
+        if (id === "player-1") return { currentHp: 100, maxHp: 100 };
+        if (id === "enemy-1") return { currentHp: 100, maxHp: 100 }; // alive in combat
+        return undefined;
+      },
+    });
+
+    const result = bridge.applyCombatAction("battle-1", "player-1", "enemy-1", stats);
+    expect(result).toEqual({ error: "TARGET_NOT_ALIVE" });
+  });
+
+  /* ── HP-009: applyCombatAction without WorldHealthWriter returns error ── */
+  it("HP-009: applyCombatAction without WorldHealthWriter returns error", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const bridge = new BattleCombatBridge(bm, cm); // no worldHp
+
+    const stats = statsMap([
+      { id: "player-1", attack: 10, defense: 5, level: 1 },
+      { id: "enemy-1", attack: 8, defense: 3, level: 1 },
+    ]);
+
+    const result = bridge.applyCombatAction("battle-1", "player-1", "enemy-1", stats);
+    expect(result).toEqual({ error: "NO_WORLD_HP_WRITER" });
+  });
+
+  /* ── HP-010: applyCombatAction on battle without combat returns error ── */
+  it("HP-010: applyCombatAction on battle without combat returns error", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const world = worldHpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 100, maxHp: 100 },
+    ]);
+    const stats = statsMap([
+      { id: "player-1", attack: 10, defense: 5, level: 1 },
+      { id: "enemy-1", attack: 8, defense: 3, level: 1 },
+    ]);
+    const bridge = new BattleCombatBridge(bm, cm, world);
+
+    bm.createBattle(
+      "battle-1",
+      participant("player-1", point(0, 0)),
+      participant("enemy-1", point(1, 0)),
+    );
+
+    const result = bridge.applyCombatAction("battle-1", "player-1", "enemy-1", stats);
+    expect(result).toEqual({ error: "BATTLE_NOT_FOUND" });
+  });
+
+  /* ── HP-011: Player death sets battle state to ELIMINATED ── */
+  it("HP-011: Player death triggers ELIMINATED via removeParticipantByDeath", () => {
+    const { bm, world, stats, bridge } = setupDuel({ p1Attack: 100, e1Hp: 1 });
+
+    bridge.applyCombatAction("battle-1", "player-1", "enemy-1", stats);
+
+    // Enemy should be removed from battle by death
+    const battle = bm.getBattle("battle-1")!;
+    expect(battle.enemySide.participants).toHaveLength(0);
+  });
+
+  /* ── HP-012: Mob death writes HP=0 to World ── */
+  it("HP-012: Mob death writes HP=0 to World", () => {
+    const { world, stats, bridge } = setupDuel({ p1Attack: 100, e1Hp: 1 });
+
+    bridge.applyCombatAction("battle-1", "player-1", "enemy-1", stats);
+
+    expect(world.getHp("enemy-1")?.currentHp).toBe(0);
+  });
+
+  /* ── HP-013: Leader death triggers automatic leader transfer ── */
+  it("HP-013: Leader death triggers automatic leader transfer", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const world = worldHpMap([
+      { id: "p1", currentHp: 100, maxHp: 100 },
+      { id: "e1", currentHp: 1, maxHp: 100 },
+      { id: "e2", currentHp: 100, maxHp: 100 },
+    ]);
+    const stats = statsMap([
+      { id: "p1", attack: 100, defense: 5, level: 1 },
+      { id: "e1", attack: 8, defense: 3, level: 1 },
+      { id: "e2", attack: 8, defense: 3, level: 1 },
+    ]);
+    const bridge = new BattleCombatBridge(bm, cm, world);
+
+    bm.createBattle(
+      "battle-1",
+      participant("p1", point(0, 0)),
+      participant("e1", point(1, 0), "ACTIVE", 10),
+    );
+    bm.addParticipant("battle-1", "enemy", participant("e2", point(2, 0), "ACTIVE", 8));
+
+    // e1 is leader (highest combatPower)
+    const battleBefore = bm.getBattle("battle-1")!;
+    expect(battleBefore.enemySide.leaderId).toBe("e1");
+
+    // Kill e1
+    bridge.beginEncounter("battle-1", world as HpProvider);
+    bridge.applyCombatAction("battle-1", "p1", "e1", stats);
+
+    // Leader should transfer to e2
+    const battleAfter = bm.getBattle("battle-1")!;
+    expect(battleAfter.enemySide.leaderId).toBe("e2");
+  });
+
+  /* ── HP-014: Non-leader death does NOT change leader ── */
+  it("HP-014: Non-leader death does NOT change leader", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const world = worldHpMap([
+      { id: "p1", currentHp: 100, maxHp: 100 },
+      { id: "e1", currentHp: 100, maxHp: 100 },
+      { id: "e2", currentHp: 1, maxHp: 100 },
+    ]);
+    const stats = statsMap([
+      { id: "p1", attack: 100, defense: 5, level: 1 },
+      { id: "e1", attack: 8, defense: 3, level: 1 },
+      { id: "e2", attack: 8, defense: 3, level: 1 },
+    ]);
+    const bridge = new BattleCombatBridge(bm, cm, world);
+
+    bm.createBattle(
+      "battle-1",
+      participant("p1", point(0, 0)),
+      participant("e1", point(1, 0), "ACTIVE", 10),
+    );
+    bm.addParticipant("battle-1", "enemy", participant("e2", point(2, 0), "ACTIVE", 8));
+
+    const battleBefore = bm.getBattle("battle-1")!;
+    expect(battleBefore.enemySide.leaderId).toBe("e1");
+
+    bridge.beginEncounter("battle-1", world as HpProvider);
+    bridge.applyCombatAction("battle-1", "p1", "e2", stats);
+
+    const battleAfter = bm.getBattle("battle-1")!;
+    expect(battleAfter.enemySide.leaderId).toBe("e1"); // unchanged
+  });
+
+  /* ── HP-015: Mob death writes HP=0 to World ── */
+  it("HP-015: Enemy mob killed → World HP=0", () => {
+    const { world, stats, bridge } = setupDuel({ p1Attack: 100, e1Hp: 1 });
+
+    bridge.applyCombatAction("battle-1", "player-1", "enemy-1", stats);
+
+    const hp = world.getHp("enemy-1");
+    expect(hp?.currentHp).toBe(0);
+    expect(world.isAlive("enemy-1")).toBe(false);
+  });
+
+  /* ── HP-016: Non-lethal damage does NOT trigger death handling ── */
+  it("HP-016: Non-lethal damage does NOT trigger death handling", () => {
+    const { bm, world, stats, bridge } = setupDuel({ e1Hp: 100 });
+
+    bridge.applyCombatAction("battle-1", "player-1", "enemy-1", stats);
+
+    // Enemy should still be in battle
+    const battle = bm.getBattle("battle-1")!;
+    expect(battle.enemySide.participants).toHaveLength(1);
+    expect(battle.enemySide.participants[0].state).toBe("ACTIVE");
+
+    // World HP should be positive
+    expect(world.isAlive("enemy-1")).toBe(true);
+  });
+
+  /* ── HP-017: Multiple participants have independent HP ── */
+  it("HP-017: Damage to player-1 doesn't affect enemy-1 World HP", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const world = worldHpMap([
+      { id: "p1", currentHp: 100, maxHp: 100 },
+      { id: "e1", currentHp: 100, maxHp: 100 },
+      { id: "e2", currentHp: 80, maxHp: 80 },
+    ]);
+    const stats = statsMap([
+      { id: "p1", attack: 10, defense: 5, level: 1 },
+      { id: "e1", attack: 8, defense: 3, level: 1 },
+      { id: "e2", attack: 8, defense: 3, level: 1 },
+    ]);
+    const bridge = new BattleCombatBridge(bm, cm, world);
+
+    bm.createBattle(
+      "battle-1",
+      participant("p1", point(0, 0)),
+      participant("e1", point(1, 0)),
+    );
+    bm.addParticipant("battle-1", "enemy", participant("e2", point(2, 0)));
+
+    bridge.beginEncounter("battle-1", world as HpProvider);
+
+    // Attack e1
+    bridge.applyCombatAction("battle-1", "p1", "e1", stats);
+
+    // e2 should be untouched
+    expect(world.getHp("e2")?.currentHp).toBe(80);
+  });
+
+  /* ── HP-018: CombatSession HP mirrors World HP ── */
+  it("HP-018: CombatSession HP is working mirror after write-back", () => {
+    const { cm, world, stats, bridge } = setupDuel({ e1Hp: 100 });
+
+    bridge.applyCombatAction("battle-1", "player-1", "enemy-1", stats);
+
+    const session = cm.getCombatSessionByBattle("battle-1")!;
+    const combatHp = session.participants.find((p) => p.participantId === "enemy-1")!;
+    const worldHp = world.getHp("enemy-1")!;
+
+    expect(combatHp.currentHp).toBe(worldHp.currentHp);
+  });
+
+  /* ── HP-019: applyCombatAction on invalid attacker returns error ── */
+  it("HP-019: applyCombatAction on invalid attacker returns CombatManager error", () => {
+    const { stats, bridge } = setupDuel();
+
+    // enemy-1 is not the current actor (player-1 is)
+    const result = bridge.applyCombatAction("battle-1", "enemy-1", "player-1", stats);
+    expect(result).toEqual({ error: "NOT_CURRENT_ACTOR" });
+  });
+
+  /* ── HP-020: Full lifecycle ── */
+  it("HP-020: Full lifecycle: beginEncounter → applyCombatAction → death → verify", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const world = worldHpMap([
+      { id: "p1", currentHp: 100, maxHp: 100 },
+      { id: "e1", currentHp: 5, maxHp: 100 },
+    ]);
+    const stats = statsMap([
+      { id: "p1", attack: 50, defense: 5, level: 3 },
+      { id: "e1", attack: 8, defense: 3, level: 1 },
+    ]);
+    const bridge = new BattleCombatBridge(bm, cm, world);
+
+    // 1. Create battle
+    bm.createBattle(
+      "battle-1",
+      participant("p1", point(0, 0)),
+      participant("e1", point(1, 0)),
+    );
+
+    // 2. Begin encounter
+    bridge.beginEncounter("battle-1", world as HpProvider);
+    expect(bridge.hasActiveCombat("battle-1")).toBe(true);
+
+    // 3. Attack to kill
+    const dmg = damageOf(
+      bridge.applyCombatAction("battle-1", "p1", "e1", stats),
+    );
+    expect(dmg.targetKilled).toBe(true);
+
+    // 4. Verify World HP = 0
+    expect(world.getHp("e1")?.currentHp).toBe(0);
+    expect(world.isAlive("e1")).toBe(false);
+
+    // 5. Verify battle state
+    const battle = bm.getBattle("battle-1")!;
+    expect(battle.enemySide.participants).toHaveLength(0);
+
+    // 6. Verify combat session state
+    const session = cm.getCombatSessionByBattle("battle-1")!;
+    const combatTarget = session.participants.find((p) => p.participantId === "e1")!;
+    expect(combatTarget.alive).toBe(false);
+    expect(combatTarget.currentHp).toBe(0);
   });
 });

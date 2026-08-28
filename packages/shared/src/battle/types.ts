@@ -223,6 +223,18 @@ export interface CombatStatsProvider {
   getStats(participantId: string): { attack: number; defense: number; level: number } | undefined;
 }
 
+/* ── Phase 3D-2B: World HP Synchronization ── */
+
+/** Injectable interface for reading and writing World entity HP. */
+export interface WorldHealthWriter {
+  /** Returns current and max HP for the given entity, or undefined if not found. */
+  getHp(entityId: string): { currentHp: number; maxHp: number } | undefined;
+  /** Write the current HP value for the given entity (clamped to [0, maxHp]). */
+  setHp(entityId: string, hp: number): void;
+  /** Returns true if the entity exists and has HP > 0. */
+  isAlive(entityId: string): boolean;
+}
+
 /* ── CombatManager Error Codes (Phase 3C) ── */
 
 /** Error codes returned by CombatManager public methods. */

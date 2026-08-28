@@ -24,6 +24,10 @@ import type {
   BattleParticipant,
   CombatParticipantState,
   CombatSession,
+  WorldHealthWriter,
+  DamageResult,
+  CombatManagerError,
+  CombatStatsProvider,
 } from "@mmo/shared";
 import type { BattleManager } from "./BattleManager.js";
 import type { CombatManager } from "./CombatManager.js";
@@ -41,12 +45,18 @@ export type BridgeError =
   | "BATTLE_NOT_FOUND"
   | "ACTIVE_COMBAT_EXISTS"
   | "NO_ELIGIBLE_PARTICIPANTS"
-  | "COMBAT_CREATION_FAILED";
+  | "COMBAT_CREATION_FAILED"
+  | "NO_WORLD_HP_WRITER";
 
 /** Bridge result type. */
 export type BridgeResult =
   | { readonly session: CombatSession }
   | { readonly error: BridgeError };
+
+/** Result of applyCombatAction. */
+export type CombatActionBridgeResult =
+  | { readonly damage: DamageResult }
+  | { readonly error: BridgeError | CombatManagerError };
 
 /** Snapshot of bridge internal state. */
 export interface BridgeSnapshot {
@@ -59,13 +69,19 @@ export interface BridgeSnapshot {
 export class BattleCombatBridge {
   private readonly battleManager: BattleManager;
   private readonly combatManager: CombatManager;
+  private readonly worldHp?: WorldHealthWriter;
 
   /** battleId → combatId mapping. */
   private readonly battleToCombat = new Map<string, string>();
 
-  constructor(battleManager: BattleManager, combatManager: CombatManager) {
+  constructor(
+    battleManager: BattleManager,
+    combatManager: CombatManager,
+    worldHp?: WorldHealthWriter,
+  ) {
     this.battleManager = battleManager;
     this.combatManager = combatManager;
+    this.worldHp = worldHp;
   }
 
   /* ── Queries ── */
@@ -213,6 +229,56 @@ export class BattleCombatBridge {
     }
 
     return result;
+  }
+
+  /**
+   * Apply a combat attack with World HP write-back.
+   *
+   * Flow:
+   * 1. Validate WorldHealthWriter exists
+   * 2. Look up combatId for this battle
+   * 3. Check target is alive in World HP (authority)
+   * 4. Delegate to CombatManager.applyAttack()
+   * 5. Write remaining HP back to World HP
+   * 6. On kill: update battle state + remove by death
+   */
+  applyCombatAction(
+    battleId: string,
+    attackerId: string,
+    targetId: string,
+    statsProvider: CombatStatsProvider,
+  ): CombatActionBridgeResult {
+    // 1. WorldHealthWriter required
+    if (!this.worldHp) return { error: "NO_WORLD_HP_WRITER" };
+
+    // 2. Combat must exist for this battle
+    const combatId = this.battleToCombat.get(battleId);
+    if (!combatId) return { error: "BATTLE_NOT_FOUND" };
+
+    // 3. Target must be alive in World HP (authority)
+    if (!this.worldHp.isAlive(targetId)) return { error: "TARGET_NOT_ALIVE" };
+
+    // 4. Delegate to CombatManager
+    const attackResult = this.combatManager.applyAttack(
+      combatId,
+      attackerId,
+      targetId,
+      statsProvider,
+    );
+    if ("error" in attackResult) return { error: attackResult.error };
+
+    const damage = attackResult.result;
+
+    // 5. Write remaining HP back to World
+    this.worldHp.setHp(targetId, damage.remainingHp);
+
+    // 6. Death handling
+    if (damage.targetKilled) {
+      this.battleManager.updateParticipantState(battleId, targetId, "ELIMINATED");
+      this.battleManager.removeParticipantByDeath(targetId);
+    }
+
+    return { damage };
   }
 
   /* ── Private Helpers ── */

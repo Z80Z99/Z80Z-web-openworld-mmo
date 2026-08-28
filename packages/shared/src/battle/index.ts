@@ -40,4 +40,6 @@ export type {
   CombatAction,
   DamageResult,
   CombatStatsProvider,
+  /* ── Phase 3D-2B: World HP Synchronization ── */
+  WorldHealthWriter,
 } from "./types.js";
