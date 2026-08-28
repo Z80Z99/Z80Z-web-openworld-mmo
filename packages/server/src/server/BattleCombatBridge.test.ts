@@ -1180,7 +1180,9 @@ describe("World HP Synchronization (HP-001 to HP-020)", () => {
     expect(p2!.maxHp).toBe(90);
     expect(p2!.side).toBe("player");
     expect(p2!.alive).toBe(true);
-    expect(session.turnOrder).toContain("player-2");
+    // MF3-003: new joins are pending — visible in participants but NOT in turnOrder until next round
+    expect(session.turnOrder).not.toContain("player-2");
+    expect(session.pendingParticipants.map((p) => p.participantId)).toContain("player-2");
   });
 
   /* ── BC-F2-002: addParticipantToCombat duplicate rejected ── */
@@ -1199,7 +1201,7 @@ describe("World HP Synchronization (HP-001 to HP-020)", () => {
 
     // Try to add player-1 again (already in combat)
     const result = bridge.addParticipantToCombat("battle-1", "player-1", provider);
-    expectBridgeError(result, "COMBAT_CREATION_FAILED");
+    expectBridgeError(result, "PARTICIPANT_ALREADY_IN_COMBAT");
   });
 
   /* ── BC-F2-003: addParticipantToCombat dead participant rejected ── */
@@ -1332,8 +1334,8 @@ describe("World HP Synchronization (HP-001 to HP-020)", () => {
     const result = bridge.syncParticipants("battle-1", fullProvider);
     const session = sessionOf(result);
 
-    // New participants go to pending queue (added at next round boundary)
-    expect(session.participants.length).toBe(2);
+    // MF3-003: New participants go to pending queue — visible in participants but added at next round boundary
+    expect(session.participants.length).toBe(4);
     expect(session.pendingParticipants).toHaveLength(2);
     expect(session.pendingParticipants.map((p) => p.participantId)).toContain("player-2");
     expect(session.pendingParticipants.map((p) => p.participantId)).toContain("enemy-2");

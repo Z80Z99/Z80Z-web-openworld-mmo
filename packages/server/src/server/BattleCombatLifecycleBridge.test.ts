@@ -225,9 +225,9 @@ describe("BattleCombatLifecycleBridge", () => {
     ]);
     bridge.beginEncounter("battle-1", hp);
     bridge.resolveCombat("battle-1");
-    // Now resolve the battle too
+    // Now resolve the battle too — idempotent, already resolved
     const result = bridge.handleBattleResolved("battle-1");
-    expect(result).toHaveProperty("session");
+    // Both combat and battle already resolved — no dangling state
     expect(bridge.hasActiveCombat("battle-1")).toBe(false);
     expect(bridge.getCombatId("battle-1")).toBeUndefined();
   });

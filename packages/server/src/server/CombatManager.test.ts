@@ -454,19 +454,19 @@ describe("Phase 3D-2A: CombatManager.applyAttack", () => {
       e1Hp: 1,
     });
 
-    // Kill the target first
+    // Kill the target first — this also triggers side elimination (RESOLVED)
     manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, makeStatsProvider({
       "player-1": { attack: 100, defense: 0, level: 10 },
       "enemy-1": { attack: 1, defense: 0, level: 1 },
     }));
 
-    // Turn advances to enemy-1, but enemy is dead, so turn skips to player-1
-    // Now try to attack the dead enemy again
+    // Phase 3F-3: combat auto-resolves when all enemies dead
+    // Now try to attack again — combat is RESOLVED
     const r = manager.applyAttack("combat-1", { actorId: "player-1", targetId: "enemy-1", actionType: "ATTACK" }, makeStatsProvider({
       "player-1": { attack: 10, defense: 5, level: 1 },
       "enemy-1": { attack: 8, defense: 3, level: 1 },
     }));
-    expect(r).toEqual({ error: "TARGET_NOT_ALIVE" });
+    expect(r).toEqual({ error: "COMBAT_NOT_ACTIVE" });
   });
 
   /* ── DM-007: dead attacker cannot attack ── */

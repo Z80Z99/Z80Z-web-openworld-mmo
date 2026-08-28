@@ -73,6 +73,12 @@ type BattleSuccess = { readonly battle: BattleGroup };
 type BattleFailure = { readonly error: BattleManagerError };
 type BattleResult = BattleSuccess | BattleFailure;
 
+const WORLD_SIZE = 65536;
+
+function normalizeCoord(c: number): number {
+  return ((c % WORLD_SIZE) + WORLD_SIZE) % WORLD_SIZE;
+}
+
 function copyPoint(point: CombatPoint): CombatPoint {
   return { x: point.x, y: point.y };
 }
@@ -150,16 +156,33 @@ function getLeader(side: MutableSide): MutableParticipant | null {
   return getParticipant(side, side.leaderId) ?? null;
 }
 
+/** Callback signature for leader transfer notifications. */
+export type LeaderTransferHandler = (battleId: string, newLeaderId: string) => void;
+
 export class BattleManager {
   private readonly config: BattleRulesConfig;
   private readonly battles = new Map<string, MutableBattleGroup>();
   private readonly participantIndex = new Map<string, ParticipantIndexEntry>();
+  private readonly leaderTransferHandlers = new Map<string, LeaderTransferHandler>();
 
   constructor(config: BattleRulesConfig = DEFAULT_BATTLE_RULES_CONFIG) {
     this.config = {
       area: { ...config.area },
       engagement: { ...config.engagement },
     };
+  }
+
+  /**
+   * Register a handler that fires when a leader is transferred for a specific battle.
+   * Used by the bridge to synchronize combat state with leader changes.
+   */
+  onLeaderTransfer(battleId: string, handler: LeaderTransferHandler): void {
+    this.leaderTransferHandlers.set(battleId, handler);
+  }
+
+  /** Remove the leader transfer handler for a specific battle. */
+  offLeaderTransfer(battleId: string): void {
+    this.leaderTransferHandlers.delete(battleId);
   }
 
   getBattle(battleId: string): BattleGroup | undefined {
@@ -311,6 +334,11 @@ export class BattleManager {
       side.leaderId = newLeader.id;
       side.area.center = copyPoint(newLeader.position);
       side.state = "ACTIVE";
+      // Notify registered handler (bridge integration)
+      const handler = this.leaderTransferHandlers.get(battleId);
+      if (handler) {
+        handler(battleId, newLeader.id);
+      }
     } else {
       this.selectLeader(side);
     }
@@ -395,6 +423,7 @@ export class BattleManager {
       ...battle.enemySide.participants,
     ].map(({ id }) => id);
     this.battles.delete(battleId);
+    this.leaderTransferHandlers.delete(battleId);
     for (const participantId of participantIds) this.participantIndex.delete(participantId);
     return { removedBattleId: battleId };
   }

@@ -183,17 +183,15 @@ describe("Phase 3F-1: Multi-Participant Combat", () => {
     expect(p1.alive).toBe(false);
   });
 
-  it("MF-015: last enemy death — combat stays ACTIVE (no auto-resolve in CombatManager)", () => {
+  it("MF-015: last enemy death — combat auto-resolves (side elimination in CombatManager)", () => {
     manager.createCombatSession("c15", "b15", [makePlayer("p1"), makeEnemy("e1", 1)]);
     attack("c15", "p1", "e1");
     const session = manager.getCombatSession("c15")!;
-    // CombatManager does NOT auto-resolve on side elimination
-    // That's handled by BattleCombatBridge/GameRoom
-    expect(session.state).toBe("ACTIVE");
+    // Phase 3F-3: CombatManager now auto-resolves when all enemies are dead
+    expect(session.state).toBe("RESOLVED");
     // e1 is dead, p1 is the only alive participant
     const e1 = session.participants.find(p => p.participantId === "e1")!;
     expect(e1.alive).toBe(false);
-    expect(session.currentActorId).toBe("p1");
   });
 
   // --- Damage integration ---

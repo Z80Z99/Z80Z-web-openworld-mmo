@@ -220,6 +220,24 @@ export class CombatManager {
     return result;
   }
 
+  /** Remove the battle→combat mapping and clean up the session (cleanup after resolve). */
+  removeCombatMapping(battleId: string): void {
+    const combatId = this.battleIndex.get(battleId);
+    this.battleIndex.delete(battleId);
+    if (combatId) {
+      const session = this.sessions.get(combatId);
+      if (session) {
+        for (const p of session.participants) {
+          this.participantIndex.delete(p.participantId);
+        }
+        for (const p of session.pendingParticipants) {
+          this.participantIndex.delete(p.participantId);
+        }
+        this.sessions.delete(combatId);
+      }
+    }
+  }
+
   /** Add a participant to an existing combat session. */
   addCombatParticipant(
     combatId: string,
@@ -262,6 +280,11 @@ export class CombatManager {
    * Add a participant to the pending queue.
    * Pending participants are flushed into active combat at the next round boundary.
    */
+  /**
+   * Add a participant to the pending queue.
+   * Pending participants are visible in participants but NOT in turnOrder
+   * until the next round boundary flush.
+   */
   addPendingCombatParticipant(
     combatId: string,
     participant: Omit<MutableCombatParticipant, "id"> & { id: string },
@@ -279,8 +302,7 @@ export class CombatManager {
       return { error: "PARTICIPANT_ALREADY_IN_COMBAT" };
     }
 
-    // Add to pending, NOT to turnOrder
-    session.pendingParticipants.push({
+    const mutable: MutableCombatParticipant = {
       participantId: participant.id,
       maxHp: participant.maxHp,
       currentHp: participant.currentHp,
@@ -288,7 +310,11 @@ export class CombatManager {
       alive: participant.alive,
       defending: participant.defending,
       side: participant.side,
-    });
+    };
+
+    // Add to participants (visible to queries) but NOT to turnOrder (pending)
+    session.participants.push(mutable);
+    session.pendingParticipants.push(mutable);
 
     return { session: toSnapshotSession(session) };
   }
@@ -425,6 +451,10 @@ export class CombatManager {
 
     // Advance turn
     this.advanceToNextAlive(session);
+
+    // MF3-008/009: Side elimination check — if all enemies or all players
+    // are dead, combat auto-resolves (not just "all participants dead")
+    this.checkSideElimination(session);
 
     // Return result
     return {
@@ -570,16 +600,60 @@ export class CombatManager {
   }
 
   /**
-   * Move pending participants into active combat.
+   * MF3-008/009: Check if one side is fully eliminated.
+   * If all enemies OR all players are dead, combat auto-resolves.
+   * Called after advanceToNextAlive in applyAttack.
+   */
+  private checkSideElimination(session: MutableCombatSession): void {
+    if (session.state !== "ACTIVE") return;
+
+    const enemies = session.participants.filter((p) => p.side === "enemy");
+    const players = session.participants.filter((p) => p.side === "player");
+
+    const allEnemiesDead = enemies.length > 0 && enemies.every((p) => !p.alive);
+    const allPlayersDead = players.length > 0 && players.every((p) => !p.alive);
+
+    if (allEnemiesDead || allPlayersDead) {
+      session.state = "RESOLVED";
+    }
+  }
+
+  /**
+   * MF3-021: Mark a participant as fleeing — remove from turnOrder.
+   * If the fleeing participant was the current actor, advance to next alive.
+   */
+  setParticipantFleeing(
+    combatId: string,
+    participantId: string,
+  ): CombatResult {
+    const session = this.sessions.get(combatId);
+    if (!session) return { error: "COMBAT_NOT_FOUND" };
+
+    const participant = session.participants.find(
+      (p) => p.participantId === participantId,
+    );
+    if (!participant) return { error: "PARTICIPANT_NOT_FOUND" };
+
+    // Remove from turnOrder (fleeing = excluded from rotation)
+    const tIndex = session.turnOrder.indexOf(participantId);
+    if (tIndex !== -1) session.turnOrder.splice(tIndex, 1);
+
+    // If current actor fled, advance to next
+    if (session.currentActorId === participantId) {
+      this.advanceToNextAlive(session);
+    }
+
+    return { session: toSnapshotSession(session) };
+  }
+
+  /**
+   * Move pending participants into active combat turn order.
    * Called at round boundaries (inside advanceToNextAlive).
    */
   private flushPendingParticipants(session: MutableCombatSession): void {
     if (session.pendingParticipants.length === 0) return;
 
-    // Move pending to participants
-    session.participants.push(...session.pendingParticipants);
-
-    // Add to turnOrder
+    // Add to turnOrder (participants are already in participants list from addPendingCombatParticipant)
     for (const p of session.pendingParticipants) {
       session.turnOrder.push(p.participantId);
       this.participantIndex.set(p.participantId, session.id);

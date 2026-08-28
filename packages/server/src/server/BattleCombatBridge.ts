@@ -47,12 +47,14 @@ export type BridgeError =
   | "NO_ELIGIBLE_PARTICIPANTS"
   | "COMBAT_CREATION_FAILED"
   | "NO_WORLD_HP_WRITER"
-  | "BATTLE_RESOLVED";
+  | "BATTLE_RESOLVED"
+  | "COMBAT_RESOLVED"
+  | "PARTICIPANT_ALREADY_IN_COMBAT";
 
 /** Bridge result type. */
 export type BridgeResult =
   | { readonly session: CombatSession }
-  | { readonly error: BridgeError };
+  | { readonly error: BridgeError | CombatManagerError };
 
 /** Result of applyCombatAction. */
 export type CombatActionBridgeResult =
@@ -71,6 +73,8 @@ export class BattleCombatBridge {
   private readonly battleManager: BattleManager;
   private readonly combatManager: CombatManager;
   private readonly worldHp?: WorldHealthWriter;
+  /** Battle IDs whose combat has been resolved (prevents reactivation). */
+  private readonly resolvedBattleIds = new Set<string>();
 
   constructor(
     battleManager: BattleManager,
@@ -80,6 +84,38 @@ export class BattleCombatBridge {
     this.battleManager = battleManager;
     this.combatManager = combatManager;
     this.worldHp = worldHp;
+  }
+
+  /**
+   * Register a leader transfer handler for a specific battle.
+   * Synchronizes combat's currentActor when battle leader changes.
+   */
+  registerLeaderTransfer(battleId: string): void {
+    this.battleManager.onLeaderTransfer(battleId, (_bid, newLeaderId) => {
+      const combatId = this.combatManager.getCombatIdByBattle(battleId);
+      if (!combatId) return;
+      const session = this.combatManager.getCombatSession(combatId);
+      if (!session || session.state === "RESOLVED") return;
+
+      // If the current actor is on the same side as the new leader
+      // but is NOT the new leader, the old leader was replaced — advance turn.
+      if (session.currentActorId === newLeaderId) return;
+
+      const newLeaderParticipant = session.participants.find(
+        (p) => p.participantId === newLeaderId,
+      );
+      if (!newLeaderParticipant) return;
+
+      const currentParticipant = session.participants.find(
+        (p) => p.participantId === session.currentActorId,
+      );
+      if (
+        currentParticipant &&
+        currentParticipant.side === newLeaderParticipant.side
+      ) {
+        this.combatManager.advanceTurn(combatId);
+      }
+    });
   }
 
   /* ── Queries ── */
@@ -147,8 +183,14 @@ export class BattleCombatBridge {
 
     // 2. Check no active combat already exists (check CombatManager directly)
     const existingSession = this.combatManager.getCombatSessionByBattle(battleId);
-    if (existingSession && existingSession.state !== "RESOLVED") {
+    if (existingSession) {
+      if (existingSession.state === "RESOLVED" || this.resolvedBattleIds.has(battleId)) {
+        return { error: "COMBAT_RESOLVED" };
+      }
       return { error: "ACTIVE_COMBAT_EXISTS" };
+    }
+    if (this.resolvedBattleIds.has(battleId)) {
+      return { error: "COMBAT_RESOLVED" };
     }
 
     // 3. Collect eligible participants from both sides with side info
@@ -175,6 +217,9 @@ export class BattleCombatBridge {
     if ("error" in result) {
       return { error: "COMBAT_CREATION_FAILED" };
     }
+
+    // 6. Register leader transfer handler to sync combat with battle leader changes
+    this.registerLeaderTransfer(battleId);
 
     return result;
   }
@@ -203,6 +248,15 @@ export class BattleCombatBridge {
       return { error: "COMBAT_CREATION_FAILED" };
     }
 
+    // Clean up leader transfer handler
+    this.battleManager.offLeaderTransfer(battleId);
+
+    // MF3-010/013: clean up the battle→combat mapping so the battle is free
+    this.combatManager.removeCombatMapping(battleId);
+
+    // Track resolved battle to prevent reactivation (MF3-020)
+    this.resolvedBattleIds.add(battleId);
+
     return setResult;
   }
 
@@ -224,7 +278,13 @@ export class BattleCombatBridge {
       if ("error" in result) {
         return { error: "COMBAT_CREATION_FAILED" };
       }
+      // Clean up leader transfer handler
+      this.battleManager.offLeaderTransfer(battleId);
       return { session: result.session };
+    }
+    // Mapping was already cleaned up by resolveCombat — idempotent success
+    if (this.resolvedBattleIds.has(battleId)) {
+      return { error: "COMBAT_RESOLVED" };
     }
     // No session at all — return error
     return { error: "BATTLE_NOT_FOUND" };
@@ -247,6 +307,9 @@ export class BattleCombatBridge {
     if ("error" in result) {
       return { error: "COMBAT_CREATION_FAILED" };
     }
+
+    // MF3-004: also remove from BattleManager (triggers leader transfer if needed)
+    this.battleManager.removeParticipant(battleId, participantId);
 
     return result;
   }
@@ -284,10 +347,10 @@ export class BattleCombatBridge {
 
     const side: "player" | "enemy" = battleInfo.sideId === "player" ? "player" : "enemy";
 
-    // 3. Check participant not already in combat
+    // 3. Check participant not already in combat (check both active and pending)
     const combatSession = this.combatManager.getCombatSession(combatId);
     if (combatSession?.participants.some((p) => p.participantId === participantId)) {
-      return { error: "COMBAT_CREATION_FAILED" };
+      return { error: "PARTICIPANT_ALREADY_IN_COMBAT" };
     }
 
     // 4. Read World HP
@@ -297,11 +360,12 @@ export class BattleCombatBridge {
     }
 
     // 5. Build CombatParticipantState
+    // Use the battle's participant data for initiative, or a default
     const battleParticipant = battleInfo.sideId === "player"
       ? battleInfo.battle.playerSide.participants.find((p) => p.id === participantId)
       : battleInfo.battle.enemySide.participants.find((p) => p.id === participantId);
 
-    if (!battleParticipant || battleParticipant.state === "ELIMINATED") {
+    if (battleParticipant && battleParticipant.state === "ELIMINATED") {
       return { error: "NO_ELIGIBLE_PARTICIPANTS" };
     }
 
@@ -309,19 +373,72 @@ export class BattleCombatBridge {
       participantId,
       currentHp: hp.currentHp,
       maxHp: hp.maxHp,
-      initiative: battleParticipant.combatPower,
+      initiative: battleParticipant?.combatPower ?? 10,
       alive: true,
       defending: false,
       side,
     };
 
-    // 6. Delegate to CombatManager
-    const result = this.combatManager.addCombatParticipant(combatId, combatParticipant);
+    // 6. Delegate to CombatManager (pending — enters turn order next round)
+    const result = this.combatManager.addPendingCombatParticipant(combatId, {
+      ...combatParticipant,
+      id: combatParticipant.participantId,
+    });
     if ("error" in result) {
       return { error: "COMBAT_CREATION_FAILED" };
     }
 
+    // Register leader transfer handler for this battle
+    this.registerLeaderTransfer(battleId);
+
     return result;
+  }
+
+  /**
+   * MF3-021: Sync FLEEING state from BattleManager to CombatManager.
+   * Reads battle participant states and removes FLEEING participants
+   * from the combat turn order.
+   */
+  syncFleeingState(battleId: string): BridgeResult {
+    const combatId = this.combatManager.getCombatIdByBattle(battleId);
+    if (!combatId) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+
+    const battle = this.battleManager.getBattle(battleId);
+    if (!battle) {
+      return { error: "BATTLE_NOT_FOUND" };
+    }
+
+    const combatSession = this.combatManager.getCombatSession(combatId);
+    if (!combatSession) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+
+    // Collect all battle participants
+    const allBattleParticipants = [
+      ...battle.playerSide.participants,
+      ...battle.enemySide.participants,
+    ];
+
+    // Find FLEEING participants that are still in combat turnOrder
+    for (const bp of allBattleParticipants) {
+      if (bp.state === "FLEEING") {
+        const inCombat = combatSession.participants.some(
+          (p) => p.participantId === bp.id,
+        );
+        const inTurnOrder = combatSession.turnOrder.includes(bp.id);
+        if (inCombat && inTurnOrder) {
+          this.combatManager.setParticipantFleeing(combatId, bp.id);
+        }
+      }
+    }
+
+    const finalSession = this.combatManager.getCombatSession(combatId);
+    if (!finalSession) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+    return { session: finalSession };
   }
 
   /**

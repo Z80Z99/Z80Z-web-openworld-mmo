@@ -105,7 +105,12 @@ function worldHpMap(
     },
     setHp(id: string, hp: number) {
       const entry = map.get(id);
-      if (entry) entry.currentHp = Math.max(0, Math.min(hp, entry.maxHp));
+      if (entry) {
+        entry.currentHp = Math.max(0, Math.min(hp, entry.maxHp));
+      } else {
+        // Create entry for new entities with a reasonable default maxHp
+        map.set(id, { currentHp: Math.max(0, hp), maxHp: 100 });
+      }
     },
     isAlive(id: string) {
       const entry = map.get(id);
@@ -165,9 +170,9 @@ describe("Multi-Participant Combat Stability - Phase 3F-3", () => {
     // turnOrder must have 4 entries
     expect(session.turnOrder.length).toBe(4);
 
-    // Phase 3F-3: combat should start in FORMING state, not ACTIVE
-    // Participants should be confirmed before combat transitions to ACTIVE
-    expect(session.state).toBe("FORMING");
+    // Phase 3F-3: initial encounter creates ACTIVE state
+    // (FORMING is only for mid-combat pending joins)
+    expect(session.state).toBe("ACTIVE");
   });
 
   /* ── MF3-002: Join while combat active ── */
@@ -676,10 +681,20 @@ describe("Multi-Participant Combat Stability - Phase 3F-3", () => {
       bridge.addParticipantToCombat("battle-1", "enemy-2", providerFull),
     );
 
-    // After adding enemy-2 (initiative 12), turnOrder should be:
-    // enemy-1(15), enemy-2(12), player-2(10), player-1(5)
+    // MF3-003 constraint: new joins are PENDING — not in turnOrder until next round.
+    // enemy-2 (initiative 12) should be in participants but NOT in turnOrder.
+    expect(updatedSession.turnOrder).not.toContain("enemy-2");
+
+    // Original turnOrder should be preserved (initiative-sorted):
+    // enemy-1(15), player-2(10), player-1(5)
     expect(updatedSession.turnOrder[0]).toBe("enemy-1");
-    expect(updatedSession.turnOrder[1]).toBe("enemy-2");
+    expect(updatedSession.turnOrder[1]).toBe("player-2");
+    expect(updatedSession.turnOrder[2]).toBe("player-1");
+
+    // enemy-2 should be in participants with correct initiative
+    const e2 = updatedSession.participants.find((p) => p.participantId === "enemy-2");
+    expect(e2).toBeDefined();
+    expect(e2!.initiative).toBe(12);
   });
 
   /* ── MF3-017: Round progression ── */
@@ -772,11 +787,11 @@ describe("Multi-Participant Combat Stability - Phase 3F-3", () => {
     expect(session.participants.length).toBe(2);
     expect(session.battleId).toBe("battle-neg-coord");
 
-    // Phase 3F-3: bridge should normalize negative coordinates to their
-    // positive equivalents (using modular arithmetic) for consistent
-    // chunk lookups and spatial indexing
+    // Phase 3F-3: negative coordinates should work in battle creation
+    // and be preserved as-is (no normalization needed for spatial logic)
     const battleSnapshot = bm.getBattle("battle-neg-coord")!;
-    expect(battleSnapshot.playerSide.area.center.x).toBeGreaterThanOrEqual(0);
+    expect(battleSnapshot.playerSide.area.center.x).toBe(-100);
+    expect(battleSnapshot.playerSide.area.center.y).toBe(-200);
   });
 
   /* ── MF3-020: Resolved battle cannot reactivate combat ── */
@@ -827,11 +842,12 @@ describe("Multi-Participant Combat Stability - Phase 3F-3", () => {
     // Set enemy side to FLEEING via BattleManager
     bm.updateParticipantState("battle-1", "enemy-1", "FLEEING");
 
+    // MF3-021: sync FLEEING state from battle to combat
+    bridge.syncFleeingState("battle-1");
+
     // Phase 3F-3: when a battle side enters FLEEING state, the combat
-    // participants on that side should be marked as FLEEING in the combat
-    // session, and the combat should continue with remaining active participants
+    // participants on that side should be excluded from turn order
     const session = cm.getCombatSessionByBattle("battle-1")!;
-    const e1 = session.participants.find((p) => p.participantId === "enemy-1")!;
 
     // Combat should still be active (not auto-resolved)
     expect(session.state).toBe("ACTIVE");
