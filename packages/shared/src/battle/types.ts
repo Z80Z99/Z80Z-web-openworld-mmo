@@ -195,6 +195,10 @@ export interface CombatSession {
   readonly turnOrder: readonly string[];
   /** Combat participants, keyed by participantId. */
   readonly participants: readonly CombatParticipantState[];
+  /** Timestamp (ms) when the current actor's turn started. null if not yet started. */
+  readonly turnStartedAt: number | null;
+  /** Maximum duration (ms) for a single turn. null means no timeout. */
+  readonly turnTimeoutMs: number | null;
 }
 
 /* ── Phase 3D-2A: Combat Damage Result Pipeline ── */

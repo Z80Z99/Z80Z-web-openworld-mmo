@@ -36,6 +36,8 @@ function createTestSession(
       combatParticipant({ participantId: "p1" }),
       combatParticipant({ participantId: "e1", currentHp: 80, initiative: 5 }),
     ],
+    turnStartedAt: null,
+    turnTimeoutMs: null,
     ...overrides,
   };
 }

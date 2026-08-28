@@ -28,6 +28,8 @@ type MutableCombatSession = {
   currentActorId: string;
   turnOrder: string[];
   participants: MutableCombatParticipant[];
+  turnStartedAt: number | null;
+  turnTimeoutMs: number | null;
 };
 
 /* ── Result types ── */
@@ -47,6 +49,8 @@ function toSnapshotSession(session: MutableCombatSession): CombatSession {
     currentActorId: session.currentActorId,
     turnOrder: [...session.turnOrder],
     participants: session.participants.map((p) => ({ ...p })),
+    turnStartedAt: session.turnStartedAt,
+    turnTimeoutMs: session.turnTimeoutMs,
   };
 }
 
@@ -82,6 +86,7 @@ export class CombatManager {
     combatId: string,
     battleId: string,
     participants: readonly CombatParticipantState[],
+    timeoutMs?: number,
   ): CombatResult {
     // Validate combat ID
     if (typeof combatId !== "string" || combatId.trim().length === 0) {
@@ -117,9 +122,11 @@ export class CombatManager {
       seenIds.add(p.participantId);
     }
 
-    // Create mutable session
-    const turnOrder = participants.map((p) => p.participantId);
-    const mutableParticipants: MutableCombatParticipant[] = participants.map(
+    // Sort by initiative descending for deterministic turn order
+    const sorted = [...participants].sort((a, b) => b.initiative - a.initiative);
+    const turnOrder = sorted.map((p) => p.participantId);
+
+    const mutableParticipants: MutableCombatParticipant[] = sorted.map(
       (p) => ({
         participantId: p.participantId,
         currentHp: p.currentHp,
@@ -131,14 +138,20 @@ export class CombatManager {
       }),
     );
 
+    // Find first alive participant for initial currentActorId
+    const firstAlive = mutableParticipants.find((p) => p.alive);
+    const initialActorId = firstAlive ? firstAlive.participantId : turnOrder[0];
+
     const session: MutableCombatSession = {
       id: combatId,
       battleId,
       state: "ACTIVE",
       round: 1,
-      currentActorId: turnOrder[0],
+      currentActorId: initialActorId,
       turnOrder,
       participants: mutableParticipants,
+      turnStartedAt: Date.now(),
+      turnTimeoutMs: timeoutMs ?? null,
     };
 
     // Store and index
@@ -378,6 +391,39 @@ export class CombatManager {
     return { removedCombatId: combatId };
   }
 
+  /**
+   * Evaluate whether the current turn has timed out.
+   * If timed out: sets current actor to defending and advances turn.
+   * Idempotent: calling again after advance returns no-op (new actor hasn't timed out).
+   */
+  evaluateTurnTimeout(
+    combatId: string,
+    now: number,
+  ): CombatResult {
+    const session = this.sessions.get(combatId);
+    if (!session) return { error: "COMBAT_NOT_FOUND" };
+    if (session.state !== "ACTIVE") return { error: "COMBAT_NOT_ACTIVE" };
+    if (session.turnTimeoutMs === null) return { session: toSnapshotSession(session) };
+
+    const elapsed = now - (session.turnStartedAt ?? 0);
+    if (elapsed < session.turnTimeoutMs) {
+      return { session: toSnapshotSession(session) };
+    }
+
+    // Timeout: auto-defend current actor
+    const currentActor = session.participants.find(
+      (p) => p.participantId === session.currentActorId,
+    );
+    if (currentActor && currentActor.alive) {
+      currentActor.defending = true;
+    }
+
+    // Advance turn
+    this.advanceToNextAlive(session);
+
+    return { session: toSnapshotSession(session) };
+  }
+
   /* ── Private helpers ── */
 
   /**
@@ -413,21 +459,18 @@ export class CombatManager {
 
       if (participant && participant.alive) {
         // Found next alive participant
-        if (nextIndex === 0 && currentIndex >= 0) {
-          // Wrapped around — increment round
+        // Only increment round when wrapping from non-zero to index 0
+        if (nextIndex === 0 && currentIndex !== 0) {
           session.round++;
         }
         session.currentActorId = participantId;
+        session.turnStartedAt = Date.now();
         return;
       }
 
       nextIndex = (nextIndex + 1) % turnOrder.length;
       attempts++;
-
-      // If we wrapped around during the search, increment round
-      if (nextIndex === 0) {
-        session.round++;
-      }
+      // REMOVED: premature round++ that caused double-increment bug
     }
 
     // No alive participants found
