@@ -46,7 +46,8 @@ export type BridgeError =
   | "ACTIVE_COMBAT_EXISTS"
   | "NO_ELIGIBLE_PARTICIPANTS"
   | "COMBAT_CREATION_FAILED"
-  | "NO_WORLD_HP_WRITER";
+  | "NO_WORLD_HP_WRITER"
+  | "BATTLE_RESOLVED";
 
 /** Bridge result type. */
 export type BridgeResult =
@@ -208,6 +209,54 @@ export class BattleCombatBridge {
 
     this.battleToCombat.delete(battleId);
     return setResult;
+  }
+
+  /**
+   * Handle battle lifecycle event: battle has been resolved.
+   * If an active combat exists for this battle, resolve it too.
+   * Idempotent: calling multiple times is safe.
+   */
+  handleBattleResolved(battleId: string): BridgeResult {
+    const combatId = this.battleToCombat.get(battleId);
+
+    // No bridge mapping — check CombatManager directly for existing session
+    if (!combatId) {
+      const existingSession = this.combatManager.getCombatSessionByBattle(battleId);
+      if (existingSession) {
+        // Already resolved — return it
+        if (existingSession.state === "RESOLVED") {
+          return { session: existingSession };
+        }
+        // Active — resolve it
+        const result = this.combatManager.setCombatState(existingSession.id, "RESOLVED");
+        if ("error" in result) {
+          return { error: "COMBAT_CREATION_FAILED" };
+        }
+        return { session: result.session };
+      }
+      // No session at all — return error
+      return { error: "BATTLE_NOT_FOUND" };
+    }
+
+    const session = this.combatManager.getCombatSession(combatId);
+
+    // Already resolved or missing — clean up mapping and return
+    if (!session || session.state === "RESOLVED") {
+      this.battleToCombat.delete(battleId);
+      if (session) return { session };
+      return { error: "BATTLE_NOT_FOUND" };
+    }
+
+    // Resolve the active combat
+    const result = this.combatManager.setCombatState(combatId, "RESOLVED");
+    if ("error" in result) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+
+    // Clean up mapping
+    this.battleToCombat.delete(battleId);
+
+    return { session: result.session };
   }
 
   /**
