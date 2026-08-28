@@ -252,6 +252,161 @@ export class BattleCombatBridge {
   }
 
   /**
+   * Add a single battle participant to an existing combat session.
+   *
+   * Flow:
+   * 1. Validate combat session exists for this battle
+   * 2. Check participant not already in combat
+   * 3. Read World HP via HpProvider
+   * 4. Build CombatParticipantState and delegate to CombatManager
+   *
+   * @param battleId - The battle with an active combat session
+   * @param participantId - The battle participant to add
+   * @param hpProvider - Injectable HP reader for World entities
+   * @returns CombatSession on success, BridgeError on failure
+   */
+  addParticipantToCombat(
+    battleId: string,
+    participantId: string,
+    hpProvider: HpProvider,
+  ): BridgeResult {
+    // 1. Validate combat session exists
+    const combatId = this.combatManager.getCombatIdByBattle(battleId);
+    if (!combatId) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+
+    // 2. Determine side from BattleManager
+    const battleInfo = this.battleManager.getBattleByParticipant(participantId);
+    if (!battleInfo) {
+      return { error: "BATTLE_NOT_FOUND" };
+    }
+
+    const side: "player" | "enemy" = battleInfo.sideId === "player" ? "player" : "enemy";
+
+    // 3. Check participant not already in combat
+    const combatSession = this.combatManager.getCombatSession(combatId);
+    if (combatSession?.participants.some((p) => p.participantId === participantId)) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+
+    // 4. Read World HP
+    const hp = hpProvider.getHp(participantId);
+    if (!hp || hp.currentHp <= 0) {
+      return { error: "NO_ELIGIBLE_PARTICIPANTS" };
+    }
+
+    // 5. Build CombatParticipantState
+    const battleParticipant = battleInfo.sideId === "player"
+      ? battleInfo.battle.playerSide.participants.find((p) => p.id === participantId)
+      : battleInfo.battle.enemySide.participants.find((p) => p.id === participantId);
+
+    if (!battleParticipant || battleParticipant.state === "ELIMINATED") {
+      return { error: "NO_ELIGIBLE_PARTICIPANTS" };
+    }
+
+    const combatParticipant: CombatParticipantState = {
+      participantId,
+      currentHp: hp.currentHp,
+      maxHp: hp.maxHp,
+      initiative: battleParticipant.combatPower,
+      alive: true,
+      defending: false,
+      side,
+    };
+
+    // 6. Delegate to CombatManager
+    const result = this.combatManager.addCombatParticipant(combatId, combatParticipant);
+    if ("error" in result) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+
+    return result;
+  }
+
+  /**
+   * Sync all eligible battle participants into the combat session.
+   *
+   * Adds any battle participants not yet in combat, and removes
+   * any combat participants no longer in the battle. Idempotent.
+   *
+   * Flow:
+   * 1. Validate combat session exists
+   * 2. Get battle participants from BattleManager
+   * 3. Add missing participants (filter ELIMINATED, dead)
+   * 4. Remove stale participants (dead, removed from battle)
+   *
+   * @param battleId - The battle with an active combat session
+   * @param hpProvider - Injectable HP reader for World entities
+   * @returns CombatSession on success, BridgeError on failure
+   */
+  syncParticipants(
+    battleId: string,
+    hpProvider: HpProvider,
+  ): BridgeResult {
+    // 1. Validate combat session exists
+    const combatId = this.combatManager.getCombatIdByBattle(battleId);
+    if (!combatId) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+
+    const battle = this.battleManager.getBattle(battleId);
+    if (!battle) {
+      return { error: "BATTLE_NOT_FOUND" };
+    }
+
+    // 2. Collect all eligible battle participants
+    const eligibleParticipants = [
+      ...this.buildCombatParticipants(battle.playerSide.participants, hpProvider, "player"),
+      ...this.buildCombatParticipants(battle.enemySide.participants, hpProvider, "enemy"),
+    ];
+
+    // 3. Add missing participants
+    const combatSession = this.combatManager.getCombatSession(combatId);
+    if (!combatSession) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+
+    const existingIds = new Set(combatSession.participants.map((p) => p.participantId));
+
+    for (const participant of eligibleParticipants) {
+      if (!existingIds.has(participant.participantId)) {
+        const addResult = this.combatManager.addCombatParticipant(combatId, participant);
+        if ("error" in addResult) {
+          return { error: "COMBAT_CREATION_FAILED" };
+        }
+      }
+    }
+
+    // 4. Remove stale participants (in combat but not in eligible battle participants)
+    const eligibleIds = new Set(eligibleParticipants.map((p) => p.participantId));
+    const refreshedSession = this.combatManager.getCombatSession(combatId);
+    if (!refreshedSession) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+
+    for (const combatParticipant of refreshedSession.participants) {
+      if (!eligibleIds.has(combatParticipant.participantId)) {
+        const removeResult = this.combatManager.removeCombatParticipant(
+          combatId,
+          combatParticipant.participantId,
+        );
+        if ("error" in removeResult) {
+          return { error: "COMBAT_CREATION_FAILED" };
+        }
+      }
+    }
+
+    // 5. Return final session
+    const finalSession = this.combatManager.getCombatSession(combatId);
+    if (!finalSession) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
+
+    return { session: finalSession };
+  }
+
+  /**
    * Apply a combat attack with World HP write-back.
    *
    * Flow:

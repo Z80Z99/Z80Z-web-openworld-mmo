@@ -1137,4 +1137,320 @@ describe("World HP Synchronization (HP-001 to HP-020)", () => {
     expect(combatTarget.alive).toBe(false);
     expect(combatTarget.currentHp).toBe(0);
   });
+
+  /* ══════════════════════════════════════════════════
+   * Phase 3F-2: Dynamic Combat Membership
+   * ══════════════════════════════════════════════════ */
+
+  /* ── BC-F2-001: addParticipantToCombat success ── */
+  it("BC-F2-001: addParticipantToCombat adds new participant to combat session", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const bridge = new BattleCombatBridge(bm, cm);
+
+    const battle = createBattle(bm, {
+      player: participant("player-1", point(0, 0)),
+      enemy: participant("enemy-1", point(1, 0)),
+    });
+
+    // Begin encounter with only player-1 and enemy-1
+    const provider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+    bridge.beginEncounter("battle-1", provider);
+
+    // Add second player to battle (not in combat yet)
+    bm.addParticipant(battle.id, "player", participant("player-2", point(0, 1)));
+
+    const providerWithP2 = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "player-2", currentHp: 90, maxHp: 90 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+
+    // Add player-2 to combat
+    const result = bridge.addParticipantToCombat("battle-1", "player-2", providerWithP2);
+    const session = sessionOf(result);
+
+    expect(session.participants.length).toBe(3);
+    const p2 = session.participants.find((p) => p.participantId === "player-2");
+    expect(p2).toBeDefined();
+    expect(p2!.currentHp).toBe(90);
+    expect(p2!.maxHp).toBe(90);
+    expect(p2!.side).toBe("player");
+    expect(p2!.alive).toBe(true);
+    expect(session.turnOrder).toContain("player-2");
+  });
+
+  /* ── BC-F2-002: addParticipantToCombat duplicate rejected ── */
+  it("BC-F2-002: addParticipantToCombat rejects participant already in combat", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const bridge = new BattleCombatBridge(bm, cm);
+
+    createBattle(bm);
+
+    const provider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+    bridge.beginEncounter("battle-1", provider);
+
+    // Try to add player-1 again (already in combat)
+    const result = bridge.addParticipantToCombat("battle-1", "player-1", provider);
+    expectBridgeError(result, "COMBAT_CREATION_FAILED");
+  });
+
+  /* ── BC-F2-003: addParticipantToCombat dead participant rejected ── */
+  it("BC-F2-003: addParticipantToCombat rejects participant with HP=0", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const bridge = new BattleCombatBridge(bm, cm);
+
+    const battle = createBattle(bm);
+    bm.addParticipant(battle.id, "player", participant("player-2", point(0, 1)));
+
+    const provider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+    bridge.beginEncounter("battle-1", provider);
+
+    // Try to add player-2 with HP=0
+    const deadProvider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "player-2", currentHp: 0, maxHp: 90 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+
+    const result = bridge.addParticipantToCombat("battle-1", "player-2", deadProvider);
+    expectBridgeError(result, "NO_ELIGIBLE_PARTICIPANTS");
+  });
+
+  /* ── BC-F2-004: addParticipantToCombat ELIMINATED participant rejected ── */
+  it("BC-F2-004: addParticipantToCombat rejects ELIMINATED battle participant", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const bridge = new BattleCombatBridge(bm, cm);
+
+    const battle = createBattle(bm);
+    // Add as ACTIVE first, then eliminate via state update (BattleManager rejects ELIMINATED in addParticipant)
+    bm.addParticipant(battle.id, "player", participant("player-2", point(0, 1)));
+    bm.updateParticipantState("battle-1", "player-2", "ELIMINATED");
+
+    const provider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+    bridge.beginEncounter("battle-1", provider);
+
+    // Try to add ELIMINATED player-2
+    const providerWithP2 = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "player-2", currentHp: 50, maxHp: 100 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+
+    const result = bridge.addParticipantToCombat("battle-1", "player-2", providerWithP2);
+    expectBridgeError(result, "NO_ELIGIBLE_PARTICIPANTS");
+  });
+
+  /* ── BC-F2-005: addParticipantToCombat no combat session ── */
+  it("BC-F2-005: addParticipantToCombat returns error when no combat exists", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const bridge = new BattleCombatBridge(bm, cm);
+
+    createBattle(bm);
+
+    const provider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+    ]);
+
+    const result = bridge.addParticipantToCombat("battle-1", "player-1", provider);
+    expectBridgeError(result, "COMBAT_CREATION_FAILED");
+  });
+
+  /* ── BC-F2-006: addParticipantToCombat enemy participant ── */
+  it("BC-F2-006: addParticipantToCombat correctly assigns enemy side", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const bridge = new BattleCombatBridge(bm, cm);
+
+    const battle = createBattle(bm);
+
+    const provider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+    bridge.beginEncounter("battle-1", provider);
+
+    // Add second enemy to battle
+    bm.addParticipant(battle.id, "enemy", participant("enemy-2", point(1, 1)));
+
+    const providerWithE2 = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+      { id: "enemy-2", currentHp: 70, maxHp: 70 },
+    ]);
+
+    const result = bridge.addParticipantToCombat("battle-1", "enemy-2", providerWithE2);
+    const session = sessionOf(result);
+
+    const e2 = session.participants.find((p) => p.participantId === "enemy-2");
+    expect(e2).toBeDefined();
+    expect(e2!.side).toBe("enemy");
+    expect(e2!.currentHp).toBe(70);
+  });
+
+  /* ── BC-F2-007: syncParticipants adds missing ── */
+  it("BC-F2-007: syncParticipants adds battle participants not yet in combat", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const bridge = new BattleCombatBridge(bm, cm);
+
+    const battle = createBattle(bm);
+
+    const provider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+    bridge.beginEncounter("battle-1", provider);
+
+    // Add player-2 and enemy-2 to battle after combat started
+    bm.addParticipant(battle.id, "player", participant("player-2", point(0, 1)));
+    bm.addParticipant(battle.id, "enemy", participant("enemy-2", point(1, 1)));
+
+    const fullProvider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "player-2", currentHp: 90, maxHp: 90 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+      { id: "enemy-2", currentHp: 70, maxHp: 70 },
+    ]);
+
+    const result = bridge.syncParticipants("battle-1", fullProvider);
+    const session = sessionOf(result);
+
+    expect(session.participants.length).toBe(4);
+    expect(session.turnOrder).toContain("player-2");
+    expect(session.turnOrder).toContain("enemy-2");
+  });
+
+  /* ── BC-F2-008: syncParticipants removes stale ── */
+  it("BC-F2-008: syncParticipants removes combat participants no longer in battle", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const bridge = new BattleCombatBridge(bm, cm);
+
+    const battle = createBattle(bm, {
+      player: participant("player-1", point(0, 0)),
+      enemy: participant("enemy-1", point(1, 0)),
+    });
+
+    // Begin combat with only player-1 and enemy-1 (no player-2 in provider)
+    const baseProvider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+    bridge.beginEncounter("battle-1", baseProvider);
+
+    // Add player-2 to battle after combat started
+    bm.addParticipant(battle.id, "player", participant("player-2", point(0, 1)));
+
+    // Add player-2 to combat via bridge
+    const providerWithP2 = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "player-2", currentHp: 90, maxHp: 90 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+    const beforeSession = sessionOf(bridge.addParticipantToCombat("battle-1", "player-2", providerWithP2));
+    expect(beforeSession.participants.length).toBe(3);
+
+    // Remove player-2 from battle
+    bm.removeParticipant("battle-1", "player-2");
+
+    // Sync should remove player-2 from combat
+    const providerWithoutP2 = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+
+    const result = bridge.syncParticipants("battle-1", providerWithoutP2);
+    const session = sessionOf(result);
+
+    expect(session.participants.length).toBe(2);
+    expect(session.participants.find((p) => p.participantId === "player-2")).toBeUndefined();
+  });
+
+  /* ── BC-F2-009: syncParticipants idempotent ── */
+  it("BC-F2-009: syncParticipants is idempotent when called multiple times", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const bridge = new BattleCombatBridge(bm, cm);
+
+    createBattle(bm);
+
+    const provider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+    bridge.beginEncounter("battle-1", provider);
+
+    // Sync twice with same data
+    const result1 = bridge.syncParticipants("battle-1", provider);
+    const result2 = bridge.syncParticipants("battle-1", provider);
+
+    const session1 = sessionOf(result1);
+    const session2 = sessionOf(result2);
+
+    expect(session1.participants.length).toBe(session2.participants.length);
+    expect(session1.turnOrder).toEqual(session2.turnOrder);
+  });
+
+  /* ── BC-F2-010: syncParticipants filters dead ── */
+  it("BC-F2-010: syncParticipants excludes dead participants from addition", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const bridge = new BattleCombatBridge(bm, cm);
+
+    const battle = createBattle(bm);
+    bm.addParticipant(battle.id, "player", participant("player-2", point(0, 1)));
+
+    const provider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+    bridge.beginEncounter("battle-1", provider);
+
+    // player-2 is dead
+    const providerWithDeadP2 = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+      { id: "player-2", currentHp: 0, maxHp: 90 },
+      { id: "enemy-1", currentHp: 80, maxHp: 80 },
+    ]);
+
+    const result = bridge.syncParticipants("battle-1", providerWithDeadP2);
+    const session = sessionOf(result);
+
+    // player-2 should NOT be added
+    expect(session.participants.length).toBe(2);
+    expect(session.participants.find((p) => p.participantId === "player-2")).toBeUndefined();
+  });
+
+  /* ── BC-F2-011: syncParticipants no combat ── */
+  it("BC-F2-011: syncParticipants returns error when no combat exists", () => {
+    const bm = new BattleManager();
+    const cm = new CombatManager();
+    const bridge = new BattleCombatBridge(bm, cm);
+
+    createBattle(bm);
+
+    const provider = hpMap([
+      { id: "player-1", currentHp: 100, maxHp: 100 },
+    ]);
+
+    const result = bridge.syncParticipants("battle-1", provider);
+    expectBridgeError(result, "COMBAT_CREATION_FAILED");
+  });
 });
