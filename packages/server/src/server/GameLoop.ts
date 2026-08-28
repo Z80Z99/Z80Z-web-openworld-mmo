@@ -8,6 +8,8 @@ import { CombatSystem } from "./CombatSystem.js";
 import { EncounterSystem, MOB_TURN_DELAY_MS } from "./EncounterSystem.js";
 import { MobSpawner } from "./MobSpawner.js";
 import { BattleManager } from "./BattleManager.js";
+import { CombatManager } from "./CombatManager.js";
+import { BattleCombatBridge } from "./BattleCombatBridge.js";
 
 /**
  * Server-side game loop running at 20 Hz.
@@ -26,6 +28,8 @@ export class GameLoop {
   private encounterSystem: EncounterSystem;
   private mobSpawner: MobSpawner;
   private battleManager: BattleManager;
+  private combatManager: CombatManager;
+  private bridge: BattleCombatBridge;
   private lastTickTime: number = 0;
 
   constructor(
@@ -37,6 +41,8 @@ export class GameLoop {
     encounterSystem: EncounterSystem,
     mobSpawner: MobSpawner,
     battleManager: BattleManager,
+    combatManager: CombatManager,
+    bridge: BattleCombatBridge,
   ) {
     this.room = room;
     this.db = db;
@@ -46,6 +52,8 @@ export class GameLoop {
     this.encounterSystem = encounterSystem;
     this.mobSpawner = mobSpawner;
     this.battleManager = battleManager;
+    this.combatManager = combatManager;
+    this.bridge = bridge;
   }
 
   /**
@@ -72,6 +80,7 @@ export class GameLoop {
     this.evaluateBattleDisengagement();
     this.tickMobAI(dt, now);
     this.tickEncounters(now);
+    this.tickCombatSessions(now);
     this.syncMobEntities();
   };
 
@@ -183,6 +192,24 @@ export class GameLoop {
    */
   private evaluateBattleDisengagement(): void {
     this.battleManager.evaluateBattleDisengagement();
+
+    // Cleanup resolved battles — prevent memory leak
+    for (const [battleId, battle] of this.battleManager.getBattles()) {
+      const isResolved =
+        battle.playerSide.state === "RESOLVED" && battle.enemySide.state === "RESOLVED";
+      const isEliminated =
+        battle.playerSide.state === "ELIMINATED" || battle.enemySide.state === "ELIMINATED";
+
+      if (isResolved || isEliminated) {
+        // Remove associated combat session if any
+        const combatSession = this.combatManager.getCombatSessionByBattle(battleId);
+        if (combatSession) {
+          this.combatManager.removeCombatSession(combatSession.id);
+        }
+        // Remove the battle
+        this.battleManager.removeBattle(battleId);
+      }
+    }
   }
 
   /**
@@ -352,30 +379,12 @@ export class GameLoop {
         if (result.reason === "player_died") {
           player.health = 0;
           this.battleManager.removeParticipantByDeath(enc.playerId);
-          client?.send("combat_event", { type: "player_died", sourceId: mob.id, targetId: enc.playerId });
-          setTimeout(() => {
-            const respawning = this.room.state.players.get(enc.playerId);
-            if (!respawning) return;
-            respawning.health = respawning.maxHealth;
-            respawning.x = 0;
-            respawning.y = 0;
-            respawning.chunkX = 0;
-            respawning.chunkY = 0;
-            for (const [, m] of this.mobSpawner.getAllMobs()) {
-              if (m.aggroTarget === enc.playerId) {
-                m.aggroTarget = null;
-                m.aiState = "patrol";
-              }
-            }
-            const respawnClient = this.room.clients.getById(enc.playerId);
-            respawnClient?.send("combat_event", {
-              type: "player_respawn",
-              sourceId: enc.playerId,
-              targetId: enc.playerId,
-              currentHp: respawning.health,
-              maxHp: respawning.maxHealth,
-            });
-          }, 3000);
+          client?.send("combat_event", {
+            type: "player_died",
+            sourceId: mob.id,
+            targetId: enc.playerId,
+          });
+          // Respawn handled by GameRoom (single authority)
         }
       }
     }
@@ -389,6 +398,17 @@ export class GameLoop {
         sourceId: enc.mobId,
         targetId: playerId,
       });
+    }
+  }
+
+  /**
+   * Tick combat sessions: evaluate turn timeouts for all active CombatManager sessions.
+   * Runs after encounter ticks and before entity sync.
+   */
+  private tickCombatSessions(now: number): void {
+    const sessions = this.combatManager.getActiveSessions();
+    for (const session of sessions) {
+      this.combatManager.evaluateTurnTimeout(session.id, now);
     }
   }
 
@@ -417,6 +437,7 @@ export class GameLoop {
       entity.x = mob.x;
       entity.y = mob.y;
       entity.health = mob.currentHp;
+      entity.maxHealth = mob.maxHp;
     }
 
     // Remove entities for mobs that no longer exist
@@ -461,8 +482,10 @@ export function createGameLoop(
   encounterSystem: EncounterSystem,
   mobSpawner: MobSpawner,
   battleManager: BattleManager,
+  combatManager: CombatManager,
+  bridge: BattleCombatBridge,
 ): GameLoop {
-  const loop = new GameLoop(room, db, aoi, movementSystem, combatSystem, encounterSystem, mobSpawner, battleManager);
+  const loop = new GameLoop(room, db, aoi, movementSystem, combatSystem, encounterSystem, mobSpawner, battleManager, combatManager, bridge);
   const tickInterval = 1000 / TICK_RATE;
   room.setSimulationInterval(loop.tick, tickInterval);
   return loop;

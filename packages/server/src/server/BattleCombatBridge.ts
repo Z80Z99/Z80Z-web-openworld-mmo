@@ -72,9 +72,6 @@ export class BattleCombatBridge {
   private readonly combatManager: CombatManager;
   private readonly worldHp?: WorldHealthWriter;
 
-  /** battleId → combatId mapping. */
-  private readonly battleToCombat = new Map<string, string>();
-
   constructor(
     battleManager: BattleManager,
     combatManager: CombatManager,
@@ -89,31 +86,35 @@ export class BattleCombatBridge {
 
   /** Get the combatId for a given battleId, or undefined if no combat exists. */
   getCombatId(battleId: string): string | undefined {
-    return this.battleToCombat.get(battleId);
+    const combatId = this.combatManager.getCombatIdByBattle(battleId);
+    if (!combatId) return undefined;
+    // Return undefined for RESOLVED sessions (mapping cleaned)
+    const session = this.combatManager.getCombatSession(combatId);
+    if (session?.state === "RESOLVED") return undefined;
+    return combatId;
   }
 
   /** Get the battleId for a given combatId, or undefined. */
   getBattleId(combatId: string): string | undefined {
-    for (const [bId, cId] of this.battleToCombat) {
-      if (cId === combatId) return bId;
-    }
-    return undefined;
+    const session = this.combatManager.getCombatSession(combatId);
+    if (!session || session.state === "RESOLVED") return undefined;
+    return session.battleId;
   }
 
   /** Check if a battle has an active combat session. */
   hasActiveCombat(battleId: string): boolean {
-    const combatId = this.battleToCombat.get(battleId);
-    if (!combatId) return false;
-    return this.combatManager.hasCombatSession(combatId);
+    const session = this.combatManager.getCombatSessionByBattle(battleId);
+    return session !== undefined && session.state === "ACTIVE";
   }
 
-  /** Get all battle-to-combat mappings as snapshots. */
+  /** Get all active battle-to-combat mappings (excludes RESOLVED). */
   getMappings(): readonly BridgeSnapshot[] {
-    const snapshots: BridgeSnapshot[] = [];
-    for (const [battleId, combatId] of this.battleToCombat) {
-      snapshots.push({ battleId, combatId });
-    }
-    return snapshots;
+    return this.combatManager
+      .getAllCombatMappings()
+      .filter((m) => {
+        const session = this.combatManager.getCombatSession(m.combatId);
+        return session !== undefined && session.state !== "RESOLVED";
+      });
   }
 
   /* ── Commands ── */
@@ -175,9 +176,6 @@ export class BattleCombatBridge {
       return { error: "COMBAT_CREATION_FAILED" };
     }
 
-    // 6. Store mapping
-    this.battleToCombat.set(battleId, resolvedCombatId);
-
     return result;
   }
 
@@ -186,19 +184,17 @@ export class BattleCombatBridge {
    * Sets combat state to RESOLVED and removes the mapping.
    */
   resolveCombat(battleId: string): BridgeResult {
-    const combatId = this.battleToCombat.get(battleId);
+    const combatId = this.combatManager.getCombatIdByBattle(battleId);
     if (!combatId) {
       return { error: "COMBAT_CREATION_FAILED" };
     }
 
     const session = this.combatManager.getCombatSession(combatId);
     if (!session) {
-      this.battleToCombat.delete(battleId);
       return { error: "COMBAT_CREATION_FAILED" };
     }
 
     if (session.state === "RESOLVED") {
-      this.battleToCombat.delete(battleId);
       return { session };
     }
 
@@ -207,7 +203,6 @@ export class BattleCombatBridge {
       return { error: "COMBAT_CREATION_FAILED" };
     }
 
-    this.battleToCombat.delete(battleId);
     return setResult;
   }
 
@@ -217,53 +212,29 @@ export class BattleCombatBridge {
    * Idempotent: calling multiple times is safe.
    */
   handleBattleResolved(battleId: string): BridgeResult {
-    const combatId = this.battleToCombat.get(battleId);
-
-    // No bridge mapping — check CombatManager directly for existing session
-    if (!combatId) {
-      const existingSession = this.combatManager.getCombatSessionByBattle(battleId);
-      if (existingSession) {
-        // Already resolved — return it
-        if (existingSession.state === "RESOLVED") {
-          return { session: existingSession };
-        }
-        // Active — resolve it
-        const result = this.combatManager.setCombatState(existingSession.id, "RESOLVED");
-        if ("error" in result) {
-          return { error: "COMBAT_CREATION_FAILED" };
-        }
-        return { session: result.session };
+    // Check CombatManager directly for existing session
+    const existingSession = this.combatManager.getCombatSessionByBattle(battleId);
+    if (existingSession) {
+      // Already resolved — return it
+      if (existingSession.state === "RESOLVED") {
+        return { session: existingSession };
       }
-      // No session at all — return error
-      return { error: "BATTLE_NOT_FOUND" };
+      // Active — resolve it
+      const result = this.combatManager.setCombatState(existingSession.id, "RESOLVED");
+      if ("error" in result) {
+        return { error: "COMBAT_CREATION_FAILED" };
+      }
+      return { session: result.session };
     }
-
-    const session = this.combatManager.getCombatSession(combatId);
-
-    // Already resolved or missing — clean up mapping and return
-    if (!session || session.state === "RESOLVED") {
-      this.battleToCombat.delete(battleId);
-      if (session) return { session };
-      return { error: "BATTLE_NOT_FOUND" };
-    }
-
-    // Resolve the active combat
-    const result = this.combatManager.setCombatState(combatId, "RESOLVED");
-    if ("error" in result) {
-      return { error: "COMBAT_CREATION_FAILED" };
-    }
-
-    // Clean up mapping
-    this.battleToCombat.delete(battleId);
-
-    return { session: result.session };
+    // No session at all — return error
+    return { error: "BATTLE_NOT_FOUND" };
   }
 
   /**
    * Remove a combat participant from the session for a battle.
    */
   removeParticipant(battleId: string, participantId: string): BridgeResult {
-    const combatId = this.battleToCombat.get(battleId);
+    const combatId = this.combatManager.getCombatIdByBattle(battleId);
     if (!combatId) {
       return { error: "COMBAT_CREATION_FAILED" };
     }
@@ -301,7 +272,7 @@ export class BattleCombatBridge {
     if (!this.worldHp) return { error: "NO_WORLD_HP_WRITER" };
 
     // 2. Combat must exist for this battle
-    const combatId = this.battleToCombat.get(battleId);
+    const combatId = this.combatManager.getCombatIdByBattle(battleId);
     if (!combatId) return { error: "BATTLE_NOT_FOUND" };
 
     // 3. Target must be alive in World HP (authority)

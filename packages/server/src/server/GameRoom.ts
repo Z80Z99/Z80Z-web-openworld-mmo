@@ -39,6 +39,8 @@ import { ShopSystem } from "./ShopSystem.js";
 import { TitleSystem } from "./TitleSystem.js";
 import { IdleSystem } from "./IdleSystem.js";
 import { BattleManager } from "./BattleManager.js";
+import { CombatManager } from "./CombatManager.js";
+import { BattleCombatBridge } from "./BattleCombatBridge.js";
 
 export const GAME_ROOM_CAPACITY = 100;
 
@@ -78,6 +80,8 @@ export class GameRoom extends Room<RoomState> {
   private titleSystem!: TitleSystem;
   private idleSystem!: IdleSystem;
   private battleManager!: BattleManager;
+  private combatManager!: CombatManager;
+  private battleCombatBridge!: BattleCombatBridge;
 
   /** Expose physics system for GameLoop integration. */
   getTilePhysics(): TilePhysics { return this.tilePhysics; }
@@ -154,9 +158,11 @@ export class GameRoom extends Room<RoomState> {
 
     // Battle manager (Dynamic Battle Area runtime)
     this.battleManager = new BattleManager();
+    this.combatManager = new CombatManager();
+    this.battleCombatBridge = new BattleCombatBridge(this.battleManager, this.combatManager);
 
     // Start game loop
-    this.gameLoop = createGameLoop(this, this.db, this.aoi, this.movementSystem, this.combatSystem, this.encounterSystem, this.mobSpawner, this.battleManager);
+    this.gameLoop = createGameLoop(this, this.db, this.aoi, this.movementSystem, this.combatSystem, this.encounterSystem, this.mobSpawner, this.battleManager, this.combatManager, this.battleCombatBridge);
 
     // Set patch rate to match tick rate
     this.setPatchRate(1000 / TICK_RATE);
@@ -761,6 +767,32 @@ export class GameRoom extends Room<RoomState> {
         });
       }
 
+      // Phase 3E-3: Route through Bridge when battle+combat exists.
+      // This is an additional sync path — the legacy processPlayerAttack
+      // above remains the primary damage source.
+      const battleForTarget = this.battleManager.getBattleByParticipant(message.targetId);
+      if (battleForTarget) {
+        const combatSession = this.combatManager.getCombatSessionByBattle(battleForTarget.battle.id);
+        if (combatSession && combatSession.state === "ACTIVE") {
+          this.battleCombatBridge.applyCombatAction(
+            battleForTarget.battle.id,
+            client.sessionId,
+            message.targetId,
+            {
+              getStats: (id: string) => {
+                if (id === client.sessionId) {
+                  const ps = this.combatSystem.getPlayerStats(id);
+                  return ps ? { attack: ps.attack, defense: ps.defense, level: player.level } : undefined;
+                }
+                const m = this.mobSpawner.getMob(id);
+                if (!m) return undefined;
+                return { attack: m.config.baseAttack, defense: m.config.baseDefense, level: m.config.level };
+              },
+            },
+          );
+        }
+      }
+
       // Begin turn-based encounter if mob survived and is within engage range.
       if (mob.currentHp > 0) {
         const engageDist = Math.hypot(player.x - mob.x, player.y - mob.y);
@@ -810,6 +842,82 @@ export class GameRoom extends Room<RoomState> {
         if (!mob || mob.aiState === "dead") return;
 
         const pStats = this.combatSystem.getPlayerStats(client.sessionId);
+
+        // Phase 3E-3: Check for combat session and route through Bridge.
+        // When a battle+combat session exists for the encounter mob,
+        // delegate the action through the bridge. On bridge failure or
+        // when no combat session exists, fall through to legacy path.
+        const battleForMob = this.battleManager.getBattleByParticipant(mob.id);
+        const combatSession = battleForMob
+          ? this.combatManager.getCombatSessionByBattle(battleForMob.battle.id)
+          : undefined;
+
+        if (combatSession && combatSession.state === "ACTIVE" && message.action === "attack") {
+          const actionResult = this.battleCombatBridge.applyCombatAction(
+            battleForMob!.battle.id,
+            client.sessionId,
+            mob.id,
+            {
+              getStats: (id: string) => {
+                if (id === client.sessionId) {
+                  const ps = this.combatSystem.getPlayerStats(id);
+                  return ps ? { attack: ps.attack, defense: ps.defense, level: player.level } : undefined;
+                }
+                const m = this.mobSpawner.getMob(id);
+                if (!m) return undefined;
+                return { attack: m.config.baseAttack, defense: m.config.baseDefense, level: m.config.level };
+              },
+            },
+          );
+
+          if (!("error" in actionResult)) {
+            // Bridge succeeded — apply damage to world state
+            const dmg = actionResult.damage;
+            const targetMob = this.mobSpawner.getMob(dmg.targetId);
+            if (targetMob) {
+              targetMob.currentHp = dmg.remainingHp;
+              const entity = this.state.entities.get(dmg.targetId);
+              if (entity) entity.health = dmg.remainingHp;
+            }
+
+            // Sync HP to client
+            sendEncounterEvent(this, client.sessionId, {
+              type: "damage_dealt",
+              sourceId: client.sessionId,
+              targetId: dmg.targetId,
+              damage: dmg.damage,
+              currentHp: dmg.remainingHp,
+              maxHp: targetMob ? targetMob.maxHp : 0,
+            });
+
+            // Handle target killed
+            if (dmg.targetKilled) {
+              mob.inEncounter = false;
+              mob.aiState = "idle";
+              mob.aggroTarget = null;
+              mob.patrolTarget = null;
+
+              resolveMobKill({
+                room: this,
+                player,
+                playerStats: pStats,
+                sessionId: client.sessionId,
+                mob,
+                getPlayerInventory: (playerId) => this.getPlayerInventory(playerId),
+                savePlayerInventory: (playerId, inv) => this.savePlayerInventory(playerId, inv),
+                getAuthData: (sid) => {
+                  const c = this.clients.getById(sid);
+                  return c ? (c as any).authData as ClientAuthData | undefined : undefined;
+                },
+              });
+            }
+
+            return; // Bridge path complete — do not run legacy path
+          }
+          // Bridge failed — fall through to legacy path
+        }
+
+        // Legacy fallback: original encounterSystem.playerAction() path
         const result = this.encounterSystem.playerAction(
           encounter,
           message.action,

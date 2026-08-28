@@ -171,6 +171,15 @@ export class BattleManager {
     return this.battles.has(battleId);
   }
 
+  /** Return a snapshot map of all active battles (for cleanup iteration). */
+  getBattles(): ReadonlyMap<string, BattleGroup> {
+    const result = new Map<string, BattleGroup>();
+    for (const [id, battle] of this.battles) {
+      result.set(id, toSnapshotBattle(battle));
+    }
+    return result;
+  }
+
   getBattleByParticipant(
     participantId: string,
   ): { readonly battle: BattleGroup; readonly sideId: BattleSideId } | undefined {
@@ -363,16 +372,22 @@ export class BattleManager {
   removeBattle(battleId: string): { readonly removedBattleId: string } | BattleFailure {
     const battle = this.battles.get(battleId);
     if (!battle) return { error: "BATTLE_NOT_FOUND" };
-    const firstLeader = getLeader(battle.playerSide);
-    const secondLeader = getLeader(battle.enemySide);
-    if (!shouldResolveBattle({
-      firstLeader: firstLeader ? toSnapshotParticipant(firstLeader) : null,
-      secondLeader: secondLeader ? toSnapshotParticipant(secondLeader) : null,
-      // The shared rule compares firstLeader to secondEnemyArea and vice versa.
-      firstEnemyArea: battle.playerSide.area,
-      secondEnemyArea: battle.enemySide.area,
-    })) {
-      return { error: "BATTLE_NOT_RESOLVED" };
+    // ELIMINATED battles can always be removed (cleanup path).
+    // Non-ELIMINATED battles must pass spatial resolution check.
+    const isEliminated =
+      battle.playerSide.state === "ELIMINATED" || battle.enemySide.state === "ELIMINATED";
+    if (!isEliminated) {
+      const firstLeader = getLeader(battle.playerSide);
+      const secondLeader = getLeader(battle.enemySide);
+      if (!shouldResolveBattle({
+        firstLeader: firstLeader ? toSnapshotParticipant(firstLeader) : null,
+        secondLeader: secondLeader ? toSnapshotParticipant(secondLeader) : null,
+        // The shared rule compares firstLeader to secondEnemyArea and vice versa.
+        firstEnemyArea: battle.playerSide.area,
+        secondEnemyArea: battle.enemySide.area,
+      })) {
+        return { error: "BATTLE_NOT_RESOLVED" };
+      }
     }
 
     const participantIds = [

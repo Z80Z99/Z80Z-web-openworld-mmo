@@ -23,6 +23,7 @@ export class EntityState extends Schema {
   @type("float32") y: number = 0;
   @type("string") type: string = "";
   @type("int32") health: number = 0;
+  @type("int32") maxHealth: number = 0;
   @type("string") ownerId: string = "";
 }
 

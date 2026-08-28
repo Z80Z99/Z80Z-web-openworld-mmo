@@ -183,6 +183,31 @@ export class CombatManager {
     return this.sessions.has(combatId);
   }
 
+  /** Get all ACTIVE combat sessions as deep-cloned snapshots. */
+  getActiveSessions(): readonly CombatSession[] {
+    const sessions: CombatSession[] = [];
+    for (const session of this.sessions.values()) {
+      if (session.state === "ACTIVE") {
+        sessions.push(toSnapshotSession(session));
+      }
+    }
+    return sessions;
+  }
+
+  /** Look up the combatId for a given battleId, or undefined. */
+  getCombatIdByBattle(battleId: string): string | undefined {
+    return this.battleIndex.get(battleId);
+  }
+
+  /** Return all battle-to-combat mappings. */
+  getAllCombatMappings(): ReadonlyArray<{ readonly battleId: string; readonly combatId: string }> {
+    const result: Array<{ readonly battleId: string; readonly combatId: string }> = [];
+    for (const [battleId, combatId] of this.battleIndex) {
+      result.push({ battleId, combatId });
+    }
+    return result;
+  }
+
   /** Add a participant to an existing combat session. */
   addCombatParticipant(
     combatId: string,
