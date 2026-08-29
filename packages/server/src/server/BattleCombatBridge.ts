@@ -168,12 +168,14 @@ export class BattleCombatBridge {
    * @param battleId - The battle to begin combat in
    * @param hpProvider - Injectable HP reader for World entities
    * @param combatId - Optional explicit combatId; auto-generated if omitted
+   * @param timeoutMs - Optional per-turn timeout; null (default) disables it
    * @returns CombatSession on success, BridgeError on failure
    */
   beginEncounter(
     battleId: string,
     hpProvider: HpProvider,
     combatId?: string,
+    timeoutMs?: number,
   ): BridgeResult {
     // 1. Validate battle exists
     const battle = this.battleManager.getBattle(battleId);
@@ -212,6 +214,7 @@ export class BattleCombatBridge {
       resolvedCombatId,
       battleId,
       combatParticipants,
+      timeoutMs,
     );
 
     if ("error" in result) {

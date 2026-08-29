@@ -1,15 +1,17 @@
 /**
- * ProductionCombatRouter — 3G-2: production 1v1 Battle/Combat activation.
+ * ProductionCombatRouter — 3G-2/3G-3: production Battle/Combat activation.
  *
  * Owns the single-ownership decision between the Legacy EncounterSystem and
  * the New Battle/Combat stack. Every attack is routed to EXACTLY ONE owner:
  *   - flag OFF                         → Legacy (byte-identical to HEAD cc4dd29)
- *   - mob owned by a CombatSession     → New Combat only (Legacy realtime blocked)
+ *   - mob owned by a CombatSession     → New Combat only (Legacy realtime blocked;
+ *                                         a non-participant attacker JOINS pending)
  *   - flag ON, no combat yet           → New Combat (battle + combat created)
  *   - New-Combat creation fails BEFORE any side effect → safe Legacy fallback
  *
- * Follows the CombatEffects.ts precedent: pure orchestration + deps context,
- * so production wiring (GameRoom/GameLoop) stays thin and tests need no Colyseus.
+ * Multi-participant (2v1/1v2/2v2) routing primitives live in
+ * ProductionMultiParticipantCombat.ts (join / target / defend / notify / enemy
+ * turns) — imported and re-exported here so GameRoom/GameLoop keep one import path.
  *
  * Damage formula stays CombatSystem.calculateDamage (single authority).
  * Reward stays CombatEffects.resolveMobKill (single authority — via deps.resolveKill).
@@ -19,15 +21,33 @@
 import type {
   BattleGroup,
   CombatSession,
-  CombatPoint,
   DamageResult,
-  ParticipantState,
 } from "@mmo/shared";
 import type { BattleManager } from "./BattleManager.js";
 import type { CombatManager } from "./CombatManager.js";
 import type { BattleCombatBridge } from "./BattleCombatBridge.js";
 import type { CombatSystem, MobInstance } from "./CombatSystem.js";
-import { MOB_TURN_DELAY_MS } from "./EncounterSystem.js";
+import { TURN_TIMEOUT_MS } from "./EncounterSystem.js";
+import {
+  buildStatsProvider,
+  buildCombatStartedPayload,
+  buildPlayerBattleParticipant,
+  markCombatNotified,
+  joinAttackerToCombat,
+  resolveEncounterTarget,
+  tickCombatEnemyTurns,
+  releaseMobCombatState,
+  routeEncounterDefend,
+  notifyCombatJoinedPlayers,
+} from "./ProductionMultiParticipantCombat.js";
+
+// Re-exported for GameRoom/GameLoop (single import path)
+export {
+  tickCombatEnemyTurns,
+  releaseMobCombatState,
+  routeEncounterDefend,
+  notifyCombatJoinedPlayers,
+};
 
 /** Minimal player view needed for combat routing. */
 export interface CombatPlayerView {
@@ -51,6 +71,12 @@ export interface ProductionCombatDeps {
   respawnPlayer: (sessionId: string) => void;
   /** Single reward authority — GameRoom wires this to CombatEffects.resolveMobKill. */
   resolveKill: (mob: MobInstance, playerSessionId: string) => void;
+  /**
+   * Phase 3G-3: dedup authority for encounter_started notifications
+   * (combatId → player session ids already notified). Optional — absent in
+   * tests that do not exercise joined-player notification.
+   */
+  combatNotifiedPlayers?: Map<string, Set<string>>;
 }
 
 /* ── Feature flag ── */
@@ -108,45 +134,13 @@ export function getBattleForMob(
 
 /* ── Battle/Combat creation (single-owner New path) ── */
 
-function toBattleParticipant(
-  id: string,
-  position: CombatPoint,
-  combatPower: number,
-  state: ParticipantState,
-) {
-  return { id, position, combatPower, personality: "aggressive" as const, state };
-}
-
-function buildCombatStartedPayload(
-  deps: ProductionCombatDeps,
-  playerSessionId: string,
-  mob: MobInstance,
-  session: CombatSession,
-): { type: string; [key: string]: unknown } {
-  const player = deps.getPlayer(playerSessionId);
-  const pStats = deps.combatSystem.getPlayerStats(playerSessionId);
-  return {
-    type: "encounter_started",
-    mobId: mob.id,
-    mobHp: mob.currentHp,
-    mobMaxHp: mob.maxHp,
-    playerHp: player?.health ?? 0,
-    playerMaxHp: player?.maxHealth ?? 0,
-    attack: pStats.attack,
-    defense: pStats.defense,
-    level: player?.level ?? 1,
-    // Additive fields — the old client reads only the six above (main.ts:240-263).
-    combatId: session.id,
-    currentActorId: session.currentActorId,
-  };
-}
-
 /**
  * Create (or reuse) the 1v1 BattleGroup + CombatSession for a player↔mob contact.
  *
  * Returns the ACTIVE session, or `null` when creation failed WITHOUT any side
  * effect (no damage, no event, battle rolled back if created here) — safe for
  * the caller to fall back to the Legacy path (PBA-020/021).
+ * Passes TURN_TIMEOUT_MS so production turn timeout is active (MP-022..024).
  */
 export function ensurePlayerCombat(
   deps: ProductionCombatDeps,
@@ -162,8 +156,20 @@ export function ensurePlayerCombat(
     const pStats = deps.combatSystem.getPlayerStats(playerSessionId);
     const created = deps.battleManager.createBattle(
       `battle-${playerSessionId}-${mob.id}`,
-      toBattleParticipant(playerSessionId, { x: player.x, y: player.y }, pStats.attack, "ACTIVE"),
-      toBattleParticipant(mob.id, { x: mob.x, y: mob.y }, mob.config.baseAttack, "ACTIVE"),
+      buildPlayerBattleParticipant(deps, playerSessionId) ?? {
+        id: playerSessionId,
+        position: { x: player.x, y: player.y },
+        combatPower: pStats.attack,
+        personality: "aggressive",
+        state: "ACTIVE",
+      },
+      {
+        id: mob.id,
+        position: { x: mob.x, y: mob.y },
+        combatPower: mob.config.baseAttack,
+        personality: "aggressive",
+        state: "ACTIVE",
+      },
     );
     if ("error" in created) return null;
     battle = created.battle;
@@ -172,7 +178,12 @@ export function ensurePlayerCombat(
 
   let session = deps.combatManager.getCombatSessionByBattle(battle.id);
   if (!session || session.state === "RESOLVED") {
-    const begin = deps.bridge.beginEncounter(battle.id, { getHp: deps.getHp });
+    const begin = deps.bridge.beginEncounter(
+      battle.id,
+      { getHp: deps.getHp },
+      undefined,
+      TURN_TIMEOUT_MS,
+    );
     if ("error" in begin) {
       // No damage / no event produced yet — roll back only what we created here,
       // then let the caller fall back to Legacy safely (PBA-020).
@@ -180,63 +191,53 @@ export function ensurePlayerCombat(
       return null;
     }
     session = begin.session;
-    deps.sendCombatEvent(playerSessionId, buildCombatStartedPayload(deps, playerSessionId, mob, session));
+    deps.sendCombatEvent(
+      playerSessionId,
+      buildCombatStartedPayload(deps, playerSessionId, session, battle),
+    );
+    markCombatNotified(deps, session.id, playerSessionId);
   }
 
   return session;
-}
-
-/** Shared stats provider (identical shape to the inline one it replaces). */
-function buildStatsProvider(deps: ProductionCombatDeps): {
-  getStats: (id: string) =>
-    | { attack: number; defense: number; level: number }
-    | undefined;
-} {
-  return {
-    getStats: (id: string) => {
-      const mob = deps.getMob(id);
-      if (mob) {
-        return {
-          attack: mob.config.baseAttack,
-          defense: mob.config.baseDefense,
-          level: mob.config.level,
-        };
-      }
-      const player = deps.getPlayer(id);
-      const ps = deps.combatSystem.getPlayerStats(id);
-      if (player && ps) {
-        return { attack: ps.attack, defense: ps.defense, level: player.level };
-      }
-      return undefined;
-    },
-  };
 }
 
 /* ── Routing (single owner per attack) ── */
 
 export type RealtimeAttackResult =
   | { kind: "blocked" }
+  | { kind: "joined" }
   | { kind: "combat"; damage?: DamageResult }
   | { kind: "fallback" };
 
 /**
  * Route a realtime `attack` message.
- * - blocked:   a CombatSession owns the mob → ignore (PBA-007/024).
- * - combat:    New path handled it (damage applied through the combat system).
- * - fallback:  creation failed before side effects → caller may run Legacy.
+ * - blocked:  the mob's combat owns it and the attacker is already a
+ *             participant (or the battle is resolving) → ignore (PBA-007/024).
+ * - joined:   a non-participant attacker joined the ACTIVE combat as PENDING
+ *             (no action this round — pending policy, MP-007/009).
+ * - combat:   New path handled it (damage applied through the combat system).
+ * - fallback: creation failed before side effects → caller may run Legacy.
  */
 export function routeRealtimeAttack(
   deps: ProductionCombatDeps,
   playerSessionId: string,
   mob: MobInstance,
 ): RealtimeAttackResult {
-  if (isMobOwnedByCombat(deps, mob.id)) return { kind: "blocked" };
+  const session = getCombatSessionForMob(deps, mob.id);
+  if (session) {
+    if (session.state !== "ACTIVE") return { kind: "blocked" }; // RESOLVED (PBA-024)
+    // Already a participant of this battle → no realtime bypass of turn order
+    if (deps.battleManager.getBattleByParticipant(playerSessionId)) return { kind: "blocked" };
+    // Non-participant attacker → join as pending (MP-001/003/007)
+    if (joinAttackerToCombat(deps, playerSessionId, mob)) return { kind: "joined" };
+    return { kind: "blocked" };
+  }
 
-  const session = ensurePlayerCombat(deps, playerSessionId, mob);
-  if (!session) return { kind: "fallback" };
+  const ensured = ensurePlayerCombat(deps, playerSessionId, mob);
+  if (!ensured) return { kind: "fallback" };
 
   const result = deps.bridge.applyCombatAction(
-    session.battleId,
+    ensured.battleId,
     playerSessionId,
     mob.id,
     buildStatsProvider(deps),
@@ -245,6 +246,7 @@ export function routeRealtimeAttack(
     // The session owns the mob — NEVER fall back to Legacy after creation.
     return { kind: "combat" };
   }
+  mob.aggroTarget = playerSessionId;
   if (result.damage.targetKilled) {
     deps.resolveKill(mob, playerSessionId);
   }
@@ -257,22 +259,18 @@ export type EncounterActionResult =
 
 /**
  * Route a turn-based `encounter_action` for a player in New Combat.
- * The target mob is derived from the player's own battle membership (1v1),
- * so no client change is needed. Never falls back to Legacy once owned.
+ * The enemy target is derived (enemy leader, else first alive enemy) for the
+ * old client; the engine still receives explicit actorId + targetId (MP-010).
+ * Never falls back to Legacy once owned.
  */
 export function routeEncounterAction(
   deps: ProductionCombatDeps,
   playerSessionId: string,
 ): EncounterActionResult {
-  const lookup = deps.battleManager.getBattleByParticipant(playerSessionId);
-  const session = lookup
-    ? deps.combatManager.getCombatSessionByBattle(lookup.battle.id)
-    : undefined;
-  if (!session || session.state !== "ACTIVE") return { kind: "not-in-combat" };
+  const resolved = resolveEncounterTarget(deps, playerSessionId);
+  if (resolved.kind !== "combat") return { kind: "not-in-combat" };
 
-  const enemy = session.participants.find((p) => p.side === "enemy" && p.alive);
-  if (!enemy) return { kind: "not-in-combat" };
-
+  const { session, enemy } = resolved;
   const result = deps.bridge.applyCombatAction(
     session.battleId,
     playerSessionId,
@@ -283,81 +281,10 @@ export function routeEncounterAction(
     // Not the player's turn (NOT_CURRENT_ACTOR) or similar — combat owns it.
     return { kind: "combat" };
   }
-  if (result.damage.targetKilled) {
-    const mob = deps.getMob(enemy.participantId);
-    if (mob) deps.resolveKill(mob, playerSessionId);
+  const mob = deps.getMob(enemy.participantId);
+  if (mob) mob.aggroTarget = playerSessionId;
+  if (result.damage.targetKilled && mob) {
+    deps.resolveKill(mob, playerSessionId);
   }
   return { kind: "combat", damage: result.damage };
-}
-
-/* ── Enemy-turn engine (driven inside the existing CombatManager tick) ── */
-
-/**
- * Auto-resolve enemy-side current actors for all ACTIVE sessions.
- * Mirrors legacy resolveMobTurn: when an enemy participant is currentActor and
- * MOB_TURN_DELAY_MS has elapsed since the turn started, it attacks the first
- * alive player participant through the bridge, then hands the turn back.
- * No second tick loop — callers invoke this from GameLoop.tickCombatSessions.
- */
-export function tickCombatEnemyTurns(deps: ProductionCombatDeps, now: number): void {
-  for (const session of deps.combatManager.getActiveSessions()) {
-    if (session.state !== "ACTIVE") continue;
-
-    const actor = session.participants.find(
-      (p) => p.participantId === session.currentActorId,
-    );
-    if (!actor || actor.side !== "enemy") continue;
-    if (now - (session.turnStartedAt ?? 0) < MOB_TURN_DELAY_MS) continue;
-
-    const target = session.participants.find((p) => p.side === "player" && p.alive);
-    if (!target) continue;
-
-    const mob = deps.getMob(actor.participantId);
-    if (!mob) continue;
-
-    const result = deps.bridge.applyCombatAction(
-      session.battleId,
-      actor.participantId,
-      target.participantId,
-      buildStatsProvider(deps),
-    );
-    if ("error" in result) continue;
-
-    const dmg = result.damage;
-    const player = deps.getPlayer(target.participantId);
-    deps.sendCombatEvent(target.participantId, {
-      type: dmg.targetKilled ? "player_died" : "player_damaged",
-      sourceId: actor.participantId,
-      targetId: target.participantId,
-      damage: dmg.damage,
-      currentHp: dmg.remainingHp,
-      maxHp: player?.maxHealth ?? 0,
-    });
-
-    if (dmg.targetKilled) {
-      deps.respawnPlayer(target.participantId);
-    }
-  }
-}
-
-/* ── Cleanup / ownership release ── */
-
-/**
- * Release combat-ownership state on mobs when their battle is cleaned up
- * (resolved or eliminated). New Combat never sets mob.inEncounter, but the
- * mob may hold aggro/pending-encounter state that must not leak into the
- * post-battle world.
- */
-export function releaseMobCombatState(
-  deps: Pick<ProductionCombatDeps, "getMob">,
-  battle: BattleGroup,
-): void {
-  for (const p of [...battle.enemySide.participants, ...battle.playerSide.participants]) {
-    const mob = deps.getMob(p.id);
-    if (!mob) continue;
-    mob.inEncounter = false;
-    mob.pendingEncounterTarget = null;
-    mob.aggroTarget = null;
-    if (mob.aiState !== "dead") mob.aiState = "idle";
-  }
 }
