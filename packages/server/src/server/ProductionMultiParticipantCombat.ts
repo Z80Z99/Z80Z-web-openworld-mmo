@@ -244,6 +244,63 @@ export function routeEncounterDefend(
   return { kind: "combat" };
 }
 
+/* ── Flee (full removal from battle + combat, server-authoritative) ── */
+
+/**
+ * Phase 3H.2: Route a player-initiated flee action through New Combat.
+ *
+ * Validation:
+ *   1. Player must be in an active battle
+ *   2. Combat session must exist and be ACTIVE
+ *   3. Flee only on player's own turn (turn-ownership gate)
+ *
+ * On success:
+ *   - Participant fully removed from CombatManager (turnOrder + participants)
+ *   - Participant fully removed from BattleManager (participants array + leader transfer + radius recalc)
+ *   - `encounter_fled` event sent to the fleeing player's client
+ *   - Turn advances to next alive participant
+ *
+ * On failure (not your turn):
+ *   - Returns `{ kind: "combat", success: false }` — no state change
+ *
+ * BattleGroup lifecycle:
+ *   - If last player flees → playerSide becomes ELIMINATED → GameLoop cleanup removes battle
+ *   - If partial group flees → remaining players continue combat
+ *   - BattleArea radius recalculated by BattleManager.removeParticipant()
+ */
+export type EncounterFleeResult =
+  | { kind: "combat"; success: boolean }
+  | { kind: "not-in-combat" };
+
+export function routeEncounterFlee(
+  deps: Pick<ProductionCombatDeps, "battleManager" | "combatManager" | "bridge" | "sendCombatEvent">,
+  playerSessionId: string,
+): EncounterFleeResult {
+  const lookup = deps.battleManager.getBattleByParticipant(playerSessionId);
+  if (!lookup) return { kind: "not-in-combat" };
+
+  const session = deps.combatManager.getCombatSessionByBattle(lookup.battle.id);
+  if (!session || session.state !== "ACTIVE") return { kind: "not-in-combat" };
+
+  // Flee only on your own turn (same gate as defend)
+  if (session.currentActorId !== playerSessionId) {
+    return { kind: "combat", success: false };
+  }
+
+  // Full removal from both CombatManager and BattleManager
+  deps.bridge.removeParticipant(lookup.battle.id, playerSessionId);
+
+  // Notify the fleeing player's client
+  const enemyId = lookup.battle.enemySide.participants[0]?.id ?? "";
+  deps.sendCombatEvent(playerSessionId, {
+    type: "encounter_fled",
+    sourceId: enemyId,
+    targetId: playerSessionId,
+  });
+
+  return { kind: "combat", success: true };
+}
+
 /* ── Joined-player notification (auto-join path) ── */
 
 /**

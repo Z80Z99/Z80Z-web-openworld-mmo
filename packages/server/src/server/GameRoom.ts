@@ -49,6 +49,7 @@ import {
   routeRealtimeAttack,
   routeEncounterAction,
   routeEncounterDefend,
+  routeEncounterFlee,
   type ProductionCombatDeps,
 } from "./ProductionCombatRouter.js";
 import { emitCombatLog } from "./ProductionCombatLog.js";
@@ -884,12 +885,12 @@ export class GameRoom extends Room<RoomState> {
         if (!player || player.health <= 0) return;
 
         // Phase 3G-2/3G-3: New Combat single ownership — route turn-based
-        // attacks and defends through the combat system when the player owns
+        // attacks, defends, and flees through the combat system when the player owns
         // an ACTIVE session. combat → new path handled it (never legacy).
         // not-in-combat → legacy.
         if (
           isBattleCombatEnabled() &&
-          (message.action === "attack" || message.action === "defend")
+          (message.action === "attack" || message.action === "defend" || message.action === "flee")
         ) {
           if (message.action === "attack") {
             const routed = routeEncounterAction(this.combatDeps, client.sessionId);
@@ -900,7 +901,7 @@ export class GameRoom extends Room<RoomState> {
               }
               return; // new path complete — do not run legacy path
             }
-          } else {
+          } else if (message.action === "defend") {
             const defended = routeEncounterDefend(
               {
                 battleManager: this.battleManager,
@@ -909,6 +910,19 @@ export class GameRoom extends Room<RoomState> {
               client.sessionId,
             );
             if (defended.kind === "combat") {
+              return; // new path complete — do not run legacy path
+            }
+          } else if (message.action === "flee") {
+            const fled = routeEncounterFlee(
+              {
+                battleManager: this.battleManager,
+                combatManager: this.combatManager,
+                bridge: this.battleCombatBridge,
+                sendCombatEvent: this.combatDeps.sendCombatEvent,
+              },
+              client.sessionId,
+            );
+            if (fled.kind === "combat") {
               return; // new path complete — do not run legacy path
             }
           }

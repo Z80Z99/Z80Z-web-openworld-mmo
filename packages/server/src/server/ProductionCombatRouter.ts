@@ -39,6 +39,7 @@ import {
   tickCombatEnemyTurns,
   releaseMobCombatState,
   routeEncounterDefend,
+  routeEncounterFlee,
   notifyCombatJoinedPlayers,
 } from "./ProductionMultiParticipantCombat.js";
 
@@ -47,6 +48,7 @@ export {
   tickCombatEnemyTurns,
   releaseMobCombatState,
   routeEncounterDefend,
+  routeEncounterFlee,
   notifyCombatJoinedPlayers,
 };
 
