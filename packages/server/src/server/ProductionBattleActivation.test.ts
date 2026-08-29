@@ -164,14 +164,17 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
   });
 
   describe("Feature flag", () => {
-    it("PBA-001: flag OFF (unset / false) → disabled → 100% Legacy", () => {
+    it("PBA-001: flag unset → New (default ON)", () => {
       delete process.env.ENABLE_BATTLE_COMBAT;
-      expect(isBattleCombatEnabled()).toBe(false);
+      expect(isBattleCombatEnabled()).toBe(true);
+    });
+
+    it("PBA-001: flag \"false\" → Legacy emergency rollback", () => {
       process.env.ENABLE_BATTLE_COMBAT = "false";
       expect(isBattleCombatEnabled()).toBe(false);
     });
 
-    it("flag ON → enabled", () => {
+    it("PBA-001: flag \"true\" → New (explicit ON)", () => {
       process.env.ENABLE_BATTLE_COMBAT = "true";
       expect(isBattleCombatEnabled()).toBe(true);
     });

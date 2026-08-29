@@ -82,11 +82,12 @@ export interface ProductionCombatDeps {
 /* ── Feature flag ── */
 
 /**
- * Reuses the project's env-var config pattern (cf. COLYSEUS_PORT).
- * Default OFF → 100% Legacy behavior.
+ * Default ON → New Battle/Combat is the production path.
+ * Exact string "false" → Legacy emergency rollback (flag flip at runtime).
+ * Unset or any other value → New (default ON).
  */
 export function isBattleCombatEnabled(): boolean {
-  return process.env.ENABLE_BATTLE_COMBAT === "true";
+  return process.env.ENABLE_BATTLE_COMBAT !== "false";
 }
 
 /* ── Ownership predicates (single-ownership core) ── */
