@@ -93,7 +93,12 @@ export class GameLoop {
     this.evaluateDynamicBattleMembership();
     this.evaluateBattleDisengagement();
     this.tickMobAI(dt, now);
-    this.tickEncounters(now);
+    // Phase 3H.1: Skip Legacy encounter tick when New Combat is active.
+    // When flag ON, all encounter processing flows through tickCombatSessions.
+    // When flag OFF, Legacy encounters run normally for emergency rollback.
+    if (!isBattleCombatEnabled()) {
+      this.tickEncounters(now);
+    }
     this.tickCombatSessions(now);
     this.syncMobEntities();
   };
