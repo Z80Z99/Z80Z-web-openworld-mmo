@@ -16,6 +16,7 @@ import {
   isPlayerOwnedByCombat,
   tickCombatEnemyTurns,
   releaseMobCombatState,
+  notifyCombatJoinedPlayers,
   type ProductionCombatDeps,
 } from "./ProductionCombatRouter.js";
 
@@ -215,6 +216,15 @@ export class GameLoop {
         },
       };
       this.bridge.syncParticipants(battleId, hpProvider);
+
+      // Phase 3G-3 (flag-gated): notify newly auto-joined player participants
+      // with the encounter_started compat payload so the old client panel opens.
+      if (isBattleCombatEnabled() && this.productionCombatDeps) {
+        const refreshed = this.combatManager.getCombatSession(combatId);
+        if (refreshed && refreshed.state === "ACTIVE") {
+          notifyCombatJoinedPlayers(this.productionCombatDeps, refreshed);
+        }
+      }
     }
   }
 
@@ -224,6 +234,19 @@ export class GameLoop {
    */
   private evaluateBattleDisengagement(): void {
     this.battleManager.evaluateBattleDisengagement();
+
+    // Phase 3G-3 (flag-gated): propagate battle-side FLEEING / rejoin to the
+    // combat session so a fleeing participant leaves turnOrder (alive stays
+    // true) and a rejoining participant regains eligibility at the next round
+    // boundary. Idempotent — safe to call every tick.
+    if (isBattleCombatEnabled()) {
+      for (const [battleId] of this.battleManager.getBattles()) {
+        const session = this.combatManager.getCombatSessionByBattle(battleId);
+        if (!session || session.state !== "ACTIVE") continue;
+        this.bridge.syncFleeingState(battleId);
+        this.bridge.syncRejoinState(battleId);
+      }
+    }
 
     // Cleanup resolved battles — prevent memory leak
     for (const [battleId, battle] of this.battleManager.getBattles()) {
@@ -251,6 +274,8 @@ export class GameLoop {
         // Remove associated combat session if any
         const combatSession = this.combatManager.getCombatSessionByBattle(battleId);
         if (combatSession) {
+          // Phase 3G-3: clean the joined-player notification state
+          this.productionCombatDeps?.combatNotifiedPlayers?.delete(combatSession.id);
           this.combatManager.removeCombatSession(combatSession.id);
         }
         // Remove the battle

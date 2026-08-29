@@ -47,6 +47,7 @@ import {
   isBattleCombatEnabled,
   routeRealtimeAttack,
   routeEncounterAction,
+  routeEncounterDefend,
   type ProductionCombatDeps,
 } from "./ProductionCombatRouter.js";
 
@@ -194,6 +195,7 @@ export class GameRoom extends Room<RoomState> {
       sendCombatEvent: (sid, evt) => sendEncounterEvent(this, sid, evt),
       respawnPlayer: (sid) => this.respawnPlayer(sid),
       resolveKill: (mob, sid) => this.resolveNewCombatKill(mob, sid),
+      combatNotifiedPlayers: new Map<string, Set<string>>(),
     };
 
     // Start game loop
@@ -760,13 +762,14 @@ export class GameRoom extends Room<RoomState> {
       // Already in an encounter — ignore the real-time attack message.
       if (this.encounterSystem.hasEncounter(client.sessionId)) return;
 
-      // Phase 3G-2: New Combat single ownership — exactly one owner per attack.
-      // blocked → New Combat owns the mob (no legacy realtime attack, PBA-007/024)
-      // combat  → New path handled it (never legacy)
-      // fallback → creation failed before side effects → legacy below (PBA-020/021)
+      // Phase 3G-2/3G-3: New Combat single ownership — exactly one owner per
+      // attack. blocked → combat owns it (no legacy realtime attack); joined →
+      // attacker entered the combat as pending (no action this round);
+      // combat → New path handled it (never legacy);
+      // fallback → creation failed before side effects → legacy below.
       if (isBattleCombatEnabled()) {
         const routed = routeRealtimeAttack(this.combatDeps, client.sessionId, mob);
-        if (routed.kind === "blocked") return;
+        if (routed.kind === "blocked" || routed.kind === "joined") return;
         if (routed.kind === "combat") {
           if (routed.damage) {
             this.sendNewCombatDamageDealt(client.sessionId, routed.damage, mob);
@@ -859,17 +862,34 @@ export class GameRoom extends Room<RoomState> {
         const player = this.state.players.get(client.sessionId);
         if (!player || player.health <= 0) return;
 
-        // Phase 3G-2: New Combat single ownership — route turn-based attacks
-        // through the combat system when the player owns an ACTIVE session.
-        // combat → new path handled it (never legacy). not-in-combat → legacy.
-        if (isBattleCombatEnabled() && message.action === "attack") {
-          const routed = routeEncounterAction(this.combatDeps, client.sessionId);
-          if (routed.kind === "combat") {
-            if (routed.damage) {
-              const targetMob = this.mobSpawner.getMob(routed.damage.targetId);
-              this.sendNewCombatDamageDealt(client.sessionId, routed.damage, targetMob ?? undefined);
+        // Phase 3G-2/3G-3: New Combat single ownership — route turn-based
+        // attacks and defends through the combat system when the player owns
+        // an ACTIVE session. combat → new path handled it (never legacy).
+        // not-in-combat → legacy.
+        if (
+          isBattleCombatEnabled() &&
+          (message.action === "attack" || message.action === "defend")
+        ) {
+          if (message.action === "attack") {
+            const routed = routeEncounterAction(this.combatDeps, client.sessionId);
+            if (routed.kind === "combat") {
+              if (routed.damage) {
+                const targetMob = this.mobSpawner.getMob(routed.damage.targetId);
+                this.sendNewCombatDamageDealt(client.sessionId, routed.damage, targetMob ?? undefined);
+              }
+              return; // new path complete — do not run legacy path
             }
-            return; // new path complete — do not run legacy path
+          } else {
+            const defended = routeEncounterDefend(
+              {
+                battleManager: this.battleManager,
+                combatManager: this.combatManager,
+              },
+              client.sessionId,
+            );
+            if (defended.kind === "combat") {
+              return; // new path complete — do not run legacy path
+            }
           }
         }
 
