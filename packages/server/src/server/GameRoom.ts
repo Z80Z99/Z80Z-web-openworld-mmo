@@ -51,6 +51,7 @@ import {
   routeEncounterDefend,
   type ProductionCombatDeps,
 } from "./ProductionCombatRouter.js";
+import { emitCombatLog } from "./ProductionCombatLog.js";
 
 export const GAME_ROOM_CAPACITY = 100;
 
@@ -199,7 +200,7 @@ export class GameRoom extends Room<RoomState> {
       combatNotifiedPlayers: new Map<string, Set<string>>(),
       logCombatEvent: (event, data) => {
         const line = `[combat] ${event} ${JSON.stringify(data)}`;
-        if (event === "legacy_fallback") {
+        if (event === "creation_failed") {
           console.warn(line);
         } else {
           console.log(line);
@@ -785,6 +786,12 @@ export class GameRoom extends Room<RoomState> {
           }
           return;
         }
+        // Phase 3G-4C: creation failed — block Legacy fallback, log structured error.
+        emitCombatLog(this.combatDeps, "fallback_blocked_attack", {
+          playerId: client.sessionId,
+          targetId: mob.id,
+        });
+        return;
       }
 
       // Phase 3G-4A: unconditional ownership backstop — a mob owned by a
@@ -905,6 +912,13 @@ export class GameRoom extends Room<RoomState> {
               return; // new path complete — do not run legacy path
             }
           }
+          // Phase 3G-4C: not-in-combat or no active session — block Legacy fallback,
+          // log structured error. Emergency rollback via ENABLE_BATTLE_COMBAT=false.
+          emitCombatLog(this.combatDeps, "fallback_blocked_encounter", {
+            playerId: client.sessionId,
+            action: message.action,
+          });
+          return;
         }
 
         const encounter = this.encounterSystem.getEncounter(client.sessionId);

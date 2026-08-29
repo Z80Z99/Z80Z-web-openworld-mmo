@@ -161,7 +161,7 @@ export function ensurePlayerCombat(
   if (!battle) {
     const player = deps.getPlayer(playerSessionId);
     if (!player || player.health <= 0) {
-      emitCombatLog(deps, "legacy_fallback", { playerId: playerSessionId, targetId: mob.id, reason: "player_unavailable" });
+      emitCombatLog(deps, "creation_failed", { playerId: playerSessionId, targetId: mob.id, reason: "player_unavailable" });
       return null;
     }
     const pStats = deps.combatSystem.getPlayerStats(playerSessionId);
@@ -183,7 +183,7 @@ export function ensurePlayerCombat(
       },
     );
     if ("error" in created) {
-      emitCombatLog(deps, "legacy_fallback", { playerId: playerSessionId, targetId: mob.id, reason: "battle_creation_failed" });
+      emitCombatLog(deps, "creation_failed", { playerId: playerSessionId, targetId: mob.id, reason: "battle_creation_failed" });
       return null;
     }
     battle = created.battle;
@@ -200,10 +200,10 @@ export function ensurePlayerCombat(
       TURN_TIMEOUT_MS,
     );
     if ("error" in begin) {
-      // No damage / no event produced yet — roll back only what we created here,
-      // then let the caller fall back to Legacy safely (PBA-020).
+      // No damage / no event produced yet — roll back only what we created here.
+      // The caller will NOT fall back to Legacy — it will log and block (PBA-020, 3G-4C).
       if (createdBattle) deps.battleManager.removeBattle(battle.id);
-      emitCombatLog(deps, "legacy_fallback", { playerId: playerSessionId, targetId: mob.id, reason: "combat_creation_failed", battleId: battle.id });
+      emitCombatLog(deps, "creation_failed", { playerId: playerSessionId, targetId: mob.id, reason: "combat_creation_failed", battleId: battle.id });
       return null;
     }
     session = begin.session;

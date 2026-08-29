@@ -4,7 +4,7 @@
  * Validates:
  * - Flag semantics (unset→true, "false"→false, "true"→true)
  * - Fallback classification (pre-creation OK, post-creation/damage NEVER)
- * - Structured logging (new_battle_started, new_combat_started, legacy_fallback, cleanup)
+ * - Structured logging (new_battle_started, new_combat_started, creation_failed, cleanup)
  * - Ownership independence from flag (mid-world flag flip safety)
  * - Single ownership (no dual-system damage/reward)
  * - Cleanup correctness (all state released after resolution)
@@ -203,7 +203,7 @@ describe("Phase 3G-4A — Production Cutover Preparation", () => {
       expect(w.bm.getBattles().size).toBe(1);
       expect(w.logs.map((l) => l.event)).toContain("new_battle_started");
       expect(w.logs.map((l) => l.event)).toContain("new_combat_started");
-      expect(w.logs.map((l) => l.event)).not.toContain("legacy_fallback");
+      expect(w.logs.map((l) => l.event)).not.toContain("creation_failed");
     });
 
     it("CUT-005: player missing → kind 'fallback', no battle/session, reason player_unavailable", () => {
@@ -214,7 +214,7 @@ describe("Phase 3G-4A — Production Cutover Preparation", () => {
       const r = routeRealtimeAttack(w.deps, "ghost", mob);
       expect(r.kind).toBe("fallback");
       expect(w.bm.getBattles().size).toBe(0);
-      const fb = w.logs.filter((l) => l.event === "legacy_fallback");
+      const fb = w.logs.filter((l) => l.event === "creation_failed");
       expect(fb).toHaveLength(1);
       expect(fb[0].data.reason).toBe("player_unavailable");
       expect(fb[0].data.playerId).toBe("ghost");
@@ -238,7 +238,7 @@ describe("Phase 3G-4A — Production Cutover Preparation", () => {
       // the critical invariant is no session exists + correct fallback reason.
       const session = w.cm.getCombatSessionByBattle("battle-p1-mob_1");
       expect(session).toBeUndefined();
-      const fb = w.logs.filter((l) => l.event === "legacy_fallback");
+      const fb = w.logs.filter((l) => l.event === "creation_failed");
       expect(fb).toHaveLength(1);
       expect(fb[0].data.reason).toBe("combat_creation_failed");
       expect(fb[0].data.battleId).toBeDefined();
@@ -247,7 +247,7 @@ describe("Phase 3G-4A — Production Cutover Preparation", () => {
       (w.bridge as any).beginEncounter = origBegin;
     });
 
-    it("CUT-007: post-combat-creation failure → kind 'combat' (NOT fallback), no legacy_fallback", () => {
+    it("CUT-007: post-combat-creation failure → kind 'combat' (NOT fallback), no creation_failed", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 100);
@@ -261,7 +261,7 @@ describe("Phase 3G-4A — Production Cutover Preparation", () => {
       // Second attack: player is participant → blocked (not fallback)
       const r2 = routeRealtimeAttack(w.deps, "p1", mob);
       expect(r2.kind).toBe("blocked");
-      expect(w.logs.map((l) => l.event)).not.toContain("legacy_fallback");
+      expect(w.logs.map((l) => l.event)).not.toContain("creation_failed");
     });
   });
 

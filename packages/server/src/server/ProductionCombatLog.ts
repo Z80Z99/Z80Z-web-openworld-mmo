@@ -5,7 +5,9 @@
 export type CombatLogEvent =
   | "new_battle_started"
   | "new_combat_started"
-  | "legacy_fallback"
+  | "creation_failed"
+  | "fallback_blocked_attack"
+  | "fallback_blocked_encounter"
   | "battle_resolved"
   | "new_combat_resolved";
 

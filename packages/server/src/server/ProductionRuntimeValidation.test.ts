@@ -983,7 +983,7 @@ describe("Phase 3G-4B — Production Runtime Validation", () => {
       w.entities.set(mob.id, { health: 200, maxHealth: 200 });
       const r = routeRealtimeAttack(w.deps, "p1", mob);
       expect(r.kind).toBe("combat");
-      expect(w.logs.map((l) => l.event)).not.toContain("legacy_fallback");
+      expect(w.logs.map((l) => l.event)).not.toContain("creation_failed");
     });
 
     it("PRV-064: missing player returns fallback with player_unavailable", () => {
@@ -992,7 +992,7 @@ describe("Phase 3G-4B — Production Runtime Validation", () => {
       w.mobs.set(mob.id, mob);
       const r = routeRealtimeAttack(w.deps, "ghost", mob);
       expect(r.kind).toBe("fallback");
-      const fb = w.logs.filter((l) => l.event === "legacy_fallback");
+      const fb = w.logs.filter((l) => l.event === "creation_failed");
       expect(fb).toHaveLength(1);
       expect(fb[0].data.reason).toBe("player_unavailable");
     });
@@ -1008,7 +1008,7 @@ describe("Phase 3G-4B — Production Runtime Validation", () => {
       const r = routeRealtimeAttack(w.deps, "p1", mob);
       expect(r.kind).toBe("fallback");
       expect(w.cm.getCombatSessionByBattle("battle-p1-mob_1")).toBeUndefined();
-      const fb = w.logs.filter((l) => l.event === "legacy_fallback");
+      const fb = w.logs.filter((l) => l.event === "creation_failed");
       expect(fb).toHaveLength(1);
       expect(fb[0].data.reason).toBe("combat_creation_failed");
       (w.bridge as any).beginEncounter = orig;
