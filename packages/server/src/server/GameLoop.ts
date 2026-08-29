@@ -19,6 +19,7 @@ import {
   notifyCombatJoinedPlayers,
   type ProductionCombatDeps,
 } from "./ProductionCombatRouter.js";
+import { emitBattleCleanup, type CombatLogDeps } from "./ProductionCombatLog.js";
 
 /**
  * Server-side game loop running at 20 Hz.
@@ -259,6 +260,7 @@ export class GameLoop {
         // Phase 3G-2 (flag-gated): release New-Combat ownership state on the
         // battle's mobs before removal, and close the client panel on
         // walk-away disengagement. Inert when the feature flag is OFF.
+        const combatSession = this.combatManager.getCombatSessionByBattle(battleId);
         if (isBattleCombatEnabled() && this.productionCombatDeps) {
           releaseMobCombatState(this.productionCombatDeps, battle);
           if (isResolved) {
@@ -270,9 +272,10 @@ export class GameLoop {
               });
             }
           }
+          // Phase 3G-4A: emit cleanup logs (flag-gated → zero output when OFF)
+          emitBattleCleanup(this.productionCombatDeps, battleId, combatSession?.id);
         }
         // Remove associated combat session if any
-        const combatSession = this.combatManager.getCombatSessionByBattle(battleId);
         if (combatSession) {
           // Phase 3G-3: clean the joined-player notification state
           this.productionCombatDeps?.combatNotifiedPlayers?.delete(combatSession.id);
@@ -343,15 +346,12 @@ export class GameLoop {
     for (const [, mob] of this.mobSpawner.getAllMobs()) {
       if (!mob.pendingEncounterTarget || mob.inEncounter) continue;
 
-      // Phase 3G-2: single ownership — a mob owned by a CombatSession must
-      // never begin a Legacy encounter (its turns run through the combat
-      // session instead), and a player already in New Combat must not be
-      // pulled into a second Legacy encounter by another mob (double damage
-      // source). Both guards are flag-gated; inert when OFF (no sessions).
+      // Phase 3G-4A: unconditional ownership guard — a mob owned by a
+      // CombatSession must never begin a Legacy encounter regardless of the
+      // flag. Inert in a fresh flag-OFF process (no sessions → false).
       if (
-        isBattleCombatEnabled() &&
-        (isMobOwnedByCombat({ battleManager: this.battleManager, combatManager: this.combatManager }, mob.id) ||
-          isPlayerOwnedByCombat({ battleManager: this.battleManager, combatManager: this.combatManager }, mob.pendingEncounterTarget))
+        isMobOwnedByCombat({ battleManager: this.battleManager, combatManager: this.combatManager }, mob.id) ||
+        isPlayerOwnedByCombat({ battleManager: this.battleManager, combatManager: this.combatManager }, mob.pendingEncounterTarget)
       ) {
         mob.pendingEncounterTarget = null;
         continue;

@@ -28,6 +28,7 @@ import type { CombatManager } from "./CombatManager.js";
 import type { BattleCombatBridge } from "./BattleCombatBridge.js";
 import type { CombatSystem, MobInstance } from "./CombatSystem.js";
 import { TURN_TIMEOUT_MS } from "./EncounterSystem.js";
+import { emitCombatLog, type CombatLogDeps } from "./ProductionCombatLog.js";
 import {
   buildStatsProvider,
   buildCombatStartedPayload,
@@ -77,6 +78,12 @@ export interface ProductionCombatDeps {
    * tests that do not exercise joined-player notification.
    */
   combatNotifiedPlayers?: Map<string, Set<string>>;
+
+  /**
+   * Phase 3G-4A: minimal structured logger for production combat events.
+   * Absent in tests that do not exercise logging. No-op when omitted.
+   */
+  logCombatEvent?: (event: string, data: Record<string, unknown>) => void;
 }
 
 /* ── Feature flag ── */
@@ -153,7 +160,10 @@ export function ensurePlayerCombat(
 
   if (!battle) {
     const player = deps.getPlayer(playerSessionId);
-    if (!player || player.health <= 0) return null;
+    if (!player || player.health <= 0) {
+      emitCombatLog(deps, "legacy_fallback", { playerId: playerSessionId, targetId: mob.id, reason: "player_unavailable" });
+      return null;
+    }
     const pStats = deps.combatSystem.getPlayerStats(playerSessionId);
     const created = deps.battleManager.createBattle(
       `battle-${playerSessionId}-${mob.id}`,
@@ -172,9 +182,13 @@ export function ensurePlayerCombat(
         state: "ACTIVE",
       },
     );
-    if ("error" in created) return null;
+    if ("error" in created) {
+      emitCombatLog(deps, "legacy_fallback", { playerId: playerSessionId, targetId: mob.id, reason: "battle_creation_failed" });
+      return null;
+    }
     battle = created.battle;
     createdBattle = true;
+    emitCombatLog(deps, "new_battle_started", { playerId: playerSessionId, mobId: mob.id, battleId: battle.id });
   }
 
   let session = deps.combatManager.getCombatSessionByBattle(battle.id);
@@ -189,9 +203,11 @@ export function ensurePlayerCombat(
       // No damage / no event produced yet — roll back only what we created here,
       // then let the caller fall back to Legacy safely (PBA-020).
       if (createdBattle) deps.battleManager.removeBattle(battle.id);
+      emitCombatLog(deps, "legacy_fallback", { playerId: playerSessionId, targetId: mob.id, reason: "combat_creation_failed", battleId: battle.id });
       return null;
     }
     session = begin.session;
+    emitCombatLog(deps, "new_combat_started", { playerId: playerSessionId, battleId: battle.id, combatId: session.id });
     deps.sendCombatEvent(
       playerSessionId,
       buildCombatStartedPayload(deps, playerSessionId, session, battle),

@@ -45,6 +45,7 @@ import { BattleCombatBridge } from "./BattleCombatBridge.js";
 import { RoomWorldHealthWriter } from "./RoomWorldHealthWriter.js";
 import {
   isBattleCombatEnabled,
+  isMobOwnedByCombat,
   routeRealtimeAttack,
   routeEncounterAction,
   routeEncounterDefend,
@@ -196,6 +197,14 @@ export class GameRoom extends Room<RoomState> {
       respawnPlayer: (sid) => this.respawnPlayer(sid),
       resolveKill: (mob, sid) => this.resolveNewCombatKill(mob, sid),
       combatNotifiedPlayers: new Map<string, Set<string>>(),
+      logCombatEvent: (event, data) => {
+        const line = `[combat] ${event} ${JSON.stringify(data)}`;
+        if (event === "legacy_fallback") {
+          console.warn(line);
+        } else {
+          console.log(line);
+        }
+      },
     };
 
     // Start game loop
@@ -777,6 +786,11 @@ export class GameRoom extends Room<RoomState> {
           return;
         }
       }
+
+      // Phase 3G-4A: unconditional ownership backstop — a mob owned by a
+      // CombatSession must never enter the Legacy path regardless of the flag.
+      // Inert in a fresh flag-OFF process (no sessions → false).
+      if (isMobOwnedByCombat(this.combatDeps, mob.id)) return;
 
       const events = this.combatSystem.processPlayerAttack(
         client.sessionId,
