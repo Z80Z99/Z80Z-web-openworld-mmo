@@ -19,12 +19,13 @@ import type {
   TradeRequest,
   CraftRequest,
   MountAction,
+  DamageResult,
 } from "@mmo/shared";
 import type Database from "better-sqlite3";
 import { Auth } from "./Auth.js";
 import { AOIManager } from "./AOI.js";
 import { GameLoop, createGameLoop } from "./GameLoop.js";
-import { CombatSystem } from "./CombatSystem.js";
+import { CombatSystem, type MobInstance } from "./CombatSystem.js";
 import { EncounterSystem, ENCOUNTER_ENGAGE_RANGE } from "./EncounterSystem.js";
 import { applyCombatEvents, applyLevelUps, resolveMobKill, sendEncounterEvent } from "./CombatEffects.js";
 import { MobSpawner } from "./MobSpawner.js";
@@ -42,6 +43,12 @@ import { BattleManager } from "./BattleManager.js";
 import { CombatManager } from "./CombatManager.js";
 import { BattleCombatBridge } from "./BattleCombatBridge.js";
 import { RoomWorldHealthWriter } from "./RoomWorldHealthWriter.js";
+import {
+  isBattleCombatEnabled,
+  routeRealtimeAttack,
+  routeEncounterAction,
+  type ProductionCombatDeps,
+} from "./ProductionCombatRouter.js";
 
 export const GAME_ROOM_CAPACITY = 100;
 
@@ -83,6 +90,8 @@ export class GameRoom extends Room<RoomState> {
   private battleManager!: BattleManager;
   private combatManager!: CombatManager;
   private battleCombatBridge!: BattleCombatBridge;
+  private roomWorldHealthWriter!: RoomWorldHealthWriter;
+  private combatDeps!: ProductionCombatDeps;
 
   /** Expose physics system for GameLoop integration. */
   getTilePhysics(): TilePhysics { return this.tilePhysics; }
@@ -160,10 +169,35 @@ export class GameRoom extends Room<RoomState> {
     // Battle manager (Dynamic Battle Area runtime)
     this.battleManager = new BattleManager();
     this.combatManager = new CombatManager();
-    this.battleCombatBridge = new BattleCombatBridge(this.battleManager, this.combatManager, new RoomWorldHealthWriter(this));
+    // Phase 3G-2: MobInstance.currentHp is the mob HP authority; the writer
+    // mirrors it into EntityState.health (players keep player.health).
+    this.roomWorldHealthWriter = new RoomWorldHealthWriter(
+      this,
+      (id) => this.mobSpawner.getMob(id),
+    );
+    this.battleCombatBridge = new BattleCombatBridge(this.battleManager, this.combatManager, this.roomWorldHealthWriter);
+
+    // Phase 3G-2: production combat router deps (single-ownership routing)
+    this.combatDeps = {
+      battleManager: this.battleManager,
+      combatManager: this.combatManager,
+      bridge: this.battleCombatBridge,
+      combatSystem: this.combatSystem,
+      getMob: (id) => this.mobSpawner.getMob(id),
+      getPlayer: (id) => {
+        const p = this.state.players.get(id);
+        return p
+          ? { x: p.x, y: p.y, health: p.health, maxHealth: p.maxHealth, level: p.level }
+          : undefined;
+      },
+      getHp: (id) => this.roomWorldHealthWriter.getHp(id),
+      sendCombatEvent: (sid, evt) => sendEncounterEvent(this, sid, evt),
+      respawnPlayer: (sid) => this.respawnPlayer(sid),
+      resolveKill: (mob, sid) => this.resolveNewCombatKill(mob, sid),
+    };
 
     // Start game loop
-    this.gameLoop = createGameLoop(this, this.db, this.aoi, this.movementSystem, this.combatSystem, this.encounterSystem, this.mobSpawner, this.battleManager, this.combatManager, this.battleCombatBridge);
+    this.gameLoop = createGameLoop(this, this.db, this.aoi, this.movementSystem, this.combatSystem, this.encounterSystem, this.mobSpawner, this.battleManager, this.combatManager, this.battleCombatBridge, this.combatDeps);
 
     // Set patch rate to match tick rate
     this.setPatchRate(1000 / TICK_RATE);
@@ -726,6 +760,21 @@ export class GameRoom extends Room<RoomState> {
       // Already in an encounter — ignore the real-time attack message.
       if (this.encounterSystem.hasEncounter(client.sessionId)) return;
 
+      // Phase 3G-2: New Combat single ownership — exactly one owner per attack.
+      // blocked → New Combat owns the mob (no legacy realtime attack, PBA-007/024)
+      // combat  → New path handled it (never legacy)
+      // fallback → creation failed before side effects → legacy below (PBA-020/021)
+      if (isBattleCombatEnabled()) {
+        const routed = routeRealtimeAttack(this.combatDeps, client.sessionId, mob);
+        if (routed.kind === "blocked") return;
+        if (routed.kind === "combat") {
+          if (routed.damage) {
+            this.sendNewCombatDamageDealt(client.sessionId, routed.damage, mob);
+          }
+          return;
+        }
+      }
+
       const events = this.combatSystem.processPlayerAttack(
         client.sessionId,
         mob,
@@ -766,32 +815,6 @@ export class GameRoom extends Room<RoomState> {
           playerStats: stats,
           sessionId: client.sessionId,
         });
-      }
-
-      // Phase 3E-3: Route through Bridge when battle+combat exists.
-      // This is an additional sync path — the legacy processPlayerAttack
-      // above remains the primary damage source.
-      const battleForTarget = this.battleManager.getBattleByParticipant(message.targetId);
-      if (battleForTarget) {
-        const combatSession = this.combatManager.getCombatSessionByBattle(battleForTarget.battle.id);
-        if (combatSession && combatSession.state === "ACTIVE") {
-          this.battleCombatBridge.applyCombatAction(
-            battleForTarget.battle.id,
-            client.sessionId,
-            message.targetId,
-            {
-              getStats: (id: string) => {
-                if (id === client.sessionId) {
-                  const ps = this.combatSystem.getPlayerStats(id);
-                  return ps ? { attack: ps.attack, defense: ps.defense, level: player.level } : undefined;
-                }
-                const m = this.mobSpawner.getMob(id);
-                if (!m) return undefined;
-                return { attack: m.config.baseAttack, defense: m.config.baseDefense, level: m.config.level };
-              },
-            },
-          );
-        }
       }
 
       // Begin turn-based encounter if mob survived and is within engage range.
@@ -836,6 +859,20 @@ export class GameRoom extends Room<RoomState> {
         const player = this.state.players.get(client.sessionId);
         if (!player || player.health <= 0) return;
 
+        // Phase 3G-2: New Combat single ownership — route turn-based attacks
+        // through the combat system when the player owns an ACTIVE session.
+        // combat → new path handled it (never legacy). not-in-combat → legacy.
+        if (isBattleCombatEnabled() && message.action === "attack") {
+          const routed = routeEncounterAction(this.combatDeps, client.sessionId);
+          if (routed.kind === "combat") {
+            if (routed.damage) {
+              const targetMob = this.mobSpawner.getMob(routed.damage.targetId);
+              this.sendNewCombatDamageDealt(client.sessionId, routed.damage, targetMob ?? undefined);
+            }
+            return; // new path complete — do not run legacy path
+          }
+        }
+
         const encounter = this.encounterSystem.getEncounter(client.sessionId);
         if (!encounter) return;
 
@@ -843,80 +880,6 @@ export class GameRoom extends Room<RoomState> {
         if (!mob || mob.aiState === "dead") return;
 
         const pStats = this.combatSystem.getPlayerStats(client.sessionId);
-
-        // Phase 3E-3: Check for combat session and route through Bridge.
-        // When a battle+combat session exists for the encounter mob,
-        // delegate the action through the bridge. On bridge failure or
-        // when no combat session exists, fall through to legacy path.
-        const battleForMob = this.battleManager.getBattleByParticipant(mob.id);
-        const combatSession = battleForMob
-          ? this.combatManager.getCombatSessionByBattle(battleForMob.battle.id)
-          : undefined;
-
-        if (combatSession && combatSession.state === "ACTIVE" && message.action === "attack") {
-          const actionResult = this.battleCombatBridge.applyCombatAction(
-            battleForMob!.battle.id,
-            client.sessionId,
-            mob.id,
-            {
-              getStats: (id: string) => {
-                if (id === client.sessionId) {
-                  const ps = this.combatSystem.getPlayerStats(id);
-                  return ps ? { attack: ps.attack, defense: ps.defense, level: player.level } : undefined;
-                }
-                const m = this.mobSpawner.getMob(id);
-                if (!m) return undefined;
-                return { attack: m.config.baseAttack, defense: m.config.baseDefense, level: m.config.level };
-              },
-            },
-          );
-
-          if (!("error" in actionResult)) {
-            // Bridge succeeded — apply damage to world state
-            const dmg = actionResult.damage;
-            const targetMob = this.mobSpawner.getMob(dmg.targetId);
-            if (targetMob) {
-              targetMob.currentHp = dmg.remainingHp;
-              const entity = this.state.entities.get(dmg.targetId);
-              if (entity) entity.health = dmg.remainingHp;
-            }
-
-            // Sync HP to client
-            sendEncounterEvent(this, client.sessionId, {
-              type: "damage_dealt",
-              sourceId: client.sessionId,
-              targetId: dmg.targetId,
-              damage: dmg.damage,
-              currentHp: dmg.remainingHp,
-              maxHp: targetMob ? targetMob.maxHp : 0,
-            });
-
-            // Handle target killed
-            if (dmg.targetKilled) {
-              mob.inEncounter = false;
-              mob.aiState = "idle";
-              mob.aggroTarget = null;
-              mob.patrolTarget = null;
-
-              resolveMobKill({
-                room: this,
-                player,
-                playerStats: pStats,
-                sessionId: client.sessionId,
-                mob,
-                getPlayerInventory: (playerId) => this.getPlayerInventory(playerId),
-                savePlayerInventory: (playerId, inv) => this.savePlayerInventory(playerId, inv),
-                getAuthData: (sid) => {
-                  const c = this.clients.getById(sid);
-                  return c ? (c as any).authData as ClientAuthData | undefined : undefined;
-                },
-              });
-            }
-
-            return; // Bridge path complete — do not run legacy path
-          }
-          // Bridge failed — fall through to legacy path
-        }
 
         // Legacy fallback: original encounterSystem.playerAction() path
         const result = this.encounterSystem.playerAction(
@@ -985,28 +948,7 @@ export class GameRoom extends Room<RoomState> {
           if (result.reason === "player_died") {
             player.health = 0;
             this.battleManager.removeParticipantByDeath(client.sessionId);
-            setTimeout(() => {
-              const respawning = this.state.players.get(client.sessionId);
-              if (!respawning) return;
-              respawning.health = respawning.maxHealth;
-              respawning.x = 0;
-              respawning.y = 0;
-              respawning.chunkX = 0;
-              respawning.chunkY = 0;
-              for (const [, m] of this.mobSpawner.getAllMobs()) {
-                if (m.aggroTarget === client.sessionId) {
-                  m.aggroTarget = null;
-                  m.aiState = "patrol";
-                }
-              }
-              sendEncounterEvent(this, client.sessionId, {
-                type: "player_respawn",
-                sourceId: client.sessionId,
-                targetId: client.sessionId,
-                currentHp: respawning.health,
-                maxHp: respawning.maxHealth,
-              });
-            }, 3000);
+            this.respawnPlayer(client.sessionId);
           }
         }
       },
@@ -1105,6 +1047,81 @@ export class GameRoom extends Room<RoomState> {
         }
       },
     );
+  }
+
+  /* ── Phase 3G-2: New Combat production helpers ── */
+
+  /**
+   * Single player respawn authority (legacy + New Combat share this).
+   * Repositions the player to spawn and restores full HP after 3s.
+   */
+  private respawnPlayer(sessionId: string): void {
+    setTimeout(() => {
+      const respawning = this.state.players.get(sessionId);
+      if (!respawning) return;
+      respawning.health = respawning.maxHealth;
+      respawning.x = 0;
+      respawning.y = 0;
+      respawning.chunkX = 0;
+      respawning.chunkY = 0;
+      for (const [, m] of this.mobSpawner.getAllMobs()) {
+        if (m.aggroTarget === sessionId) {
+          m.aggroTarget = null;
+          m.aiState = "patrol";
+        }
+      }
+      sendEncounterEvent(this, sessionId, {
+        type: "player_respawn",
+        sourceId: sessionId,
+        targetId: sessionId,
+        currentHp: respawning.health,
+        maxHp: respawning.maxHealth,
+      });
+    }, 3000);
+  }
+
+  /**
+   * Render New-Combat damage: sync the mob mirror + emit the legacy
+   * damage_dealt event the old client already understands.
+   */
+  private sendNewCombatDamageDealt(
+    attackerSessionId: string,
+    dmg: DamageResult,
+    targetMob: { maxHp: number } | undefined,
+  ): void {
+    const entity = this.state.entities.get(dmg.targetId);
+    if (entity) entity.health = dmg.remainingHp;
+    sendEncounterEvent(this, attackerSessionId, {
+      type: "damage_dealt",
+      sourceId: attackerSessionId,
+      targetId: dmg.targetId,
+      damage: dmg.damage,
+      currentHp: dmg.remainingHp,
+      maxHp: targetMob ? targetMob.maxHp : 0,
+    });
+  }
+
+  /**
+   * Single New-Combat kill reward path — delegates to the authoritative
+   * CombatEffects.resolveMobKill (no second XP/Loot/Quest system).
+   */
+  private resolveNewCombatKill(mob: MobInstance, sessionId: string): void {
+    const player = this.state.players.get(sessionId);
+    if (!player) return;
+    const playerStats = this.combatSystem.getPlayerStats(sessionId);
+    resolveMobKill({
+      room: this,
+      player,
+      playerStats,
+      sessionId,
+      mob,
+      getPlayerInventory: (playerId) => this.getPlayerInventory(playerId),
+      savePlayerInventory: (playerId, inv) => this.savePlayerInventory(playerId, inv),
+      getAuthData: (sid) => {
+        const c = this.clients.getById(sid);
+        return c ? (c as any).authData as ClientAuthData | undefined : undefined;
+      },
+    });
   }
 
   /**

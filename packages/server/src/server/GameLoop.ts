@@ -10,6 +10,14 @@ import { MobSpawner } from "./MobSpawner.js";
 import { BattleManager } from "./BattleManager.js";
 import { CombatManager } from "./CombatManager.js";
 import { BattleCombatBridge, type HpProvider } from "./BattleCombatBridge.js";
+import {
+  isBattleCombatEnabled,
+  isMobOwnedByCombat,
+  isPlayerOwnedByCombat,
+  tickCombatEnemyTurns,
+  releaseMobCombatState,
+  type ProductionCombatDeps,
+} from "./ProductionCombatRouter.js";
 
 /**
  * Server-side game loop running at 20 Hz.
@@ -30,6 +38,8 @@ export class GameLoop {
   private battleManager: BattleManager;
   private combatManager: CombatManager;
   private bridge: BattleCombatBridge;
+  /** Phase 3G-2: production combat routing deps (optional — New Combat only). */
+  private productionCombatDeps?: ProductionCombatDeps;
   private lastTickTime: number = 0;
 
   constructor(
@@ -43,6 +53,7 @@ export class GameLoop {
     battleManager: BattleManager,
     combatManager: CombatManager,
     bridge: BattleCombatBridge,
+    productionCombatDeps?: ProductionCombatDeps,
   ) {
     this.room = room;
     this.db = db;
@@ -54,6 +65,7 @@ export class GameLoop {
     this.battleManager = battleManager;
     this.combatManager = combatManager;
     this.bridge = bridge;
+    this.productionCombatDeps = productionCombatDeps;
   }
 
   /**
@@ -221,6 +233,21 @@ export class GameLoop {
         battle.playerSide.state === "ELIMINATED" || battle.enemySide.state === "ELIMINATED";
 
       if (isResolved || isEliminated) {
+        // Phase 3G-2 (flag-gated): release New-Combat ownership state on the
+        // battle's mobs before removal, and close the client panel on
+        // walk-away disengagement. Inert when the feature flag is OFF.
+        if (isBattleCombatEnabled() && this.productionCombatDeps) {
+          releaseMobCombatState(this.productionCombatDeps, battle);
+          if (isResolved) {
+            for (const p of battle.playerSide.participants) {
+              this.room.clients.getById(p.id)?.send("combat_event", {
+                type: "encounter_fled",
+                sourceId: battle.enemySide.participants[0]?.id ?? "",
+                targetId: p.id,
+              });
+            }
+          }
+        }
         // Remove associated combat session if any
         const combatSession = this.combatManager.getCombatSessionByBattle(battleId);
         if (combatSession) {
@@ -290,6 +317,20 @@ export class GameLoop {
     // Begin encounters for mobs that have a pending target
     for (const [, mob] of this.mobSpawner.getAllMobs()) {
       if (!mob.pendingEncounterTarget || mob.inEncounter) continue;
+
+      // Phase 3G-2: single ownership — a mob owned by a CombatSession must
+      // never begin a Legacy encounter (its turns run through the combat
+      // session instead), and a player already in New Combat must not be
+      // pulled into a second Legacy encounter by another mob (double damage
+      // source). Both guards are flag-gated; inert when OFF (no sessions).
+      if (
+        isBattleCombatEnabled() &&
+        (isMobOwnedByCombat({ battleManager: this.battleManager, combatManager: this.combatManager }, mob.id) ||
+          isPlayerOwnedByCombat({ battleManager: this.battleManager, combatManager: this.combatManager }, mob.pendingEncounterTarget))
+      ) {
+        mob.pendingEncounterTarget = null;
+        continue;
+      }
 
       const targetSessionId = mob.pendingEncounterTarget;
       const player = this.room.state.players.get(targetSessionId);
@@ -422,13 +463,17 @@ export class GameLoop {
   }
 
   /**
-   * Tick combat sessions: evaluate turn timeouts for all active CombatManager sessions.
-   * Runs after encounter ticks and before entity sync.
+   * Tick combat sessions: evaluate turn timeouts for all active CombatManager
+   * sessions, and (Phase 3G-2, flag-gated) auto-resolve enemy-side turns.
+   * Runs after encounter ticks and before entity sync. No second tick loop.
    */
   private tickCombatSessions(now: number): void {
     const sessions = this.combatManager.getActiveSessions();
     for (const session of sessions) {
       this.combatManager.evaluateTurnTimeout(session.id, now);
+    }
+    if (isBattleCombatEnabled() && this.productionCombatDeps) {
+      tickCombatEnemyTurns(this.productionCombatDeps, now);
     }
   }
 
@@ -504,8 +549,9 @@ export function createGameLoop(
   battleManager: BattleManager,
   combatManager: CombatManager,
   bridge: BattleCombatBridge,
+  productionCombatDeps?: ProductionCombatDeps,
 ): GameLoop {
-  const loop = new GameLoop(room, db, aoi, movementSystem, combatSystem, encounterSystem, mobSpawner, battleManager, combatManager, bridge);
+  const loop = new GameLoop(room, db, aoi, movementSystem, combatSystem, encounterSystem, mobSpawner, battleManager, combatManager, bridge, productionCombatDeps);
   const tickInterval = 1000 / TICK_RATE;
   room.setSimulationInterval(loop.tick, tickInterval);
   return loop;
