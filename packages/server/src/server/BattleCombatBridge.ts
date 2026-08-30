@@ -312,7 +312,10 @@ export class BattleCombatBridge {
     }
 
     // MF3-004: also remove from BattleManager (triggers leader transfer if needed)
-    this.battleManager.removeParticipant(battleId, participantId);
+    const bmResult = this.battleManager.removeParticipant(battleId, participantId);
+    if ("error" in bmResult) {
+      return { error: "COMBAT_CREATION_FAILED" };
+    }
 
     return result;
   }

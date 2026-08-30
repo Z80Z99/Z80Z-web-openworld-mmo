@@ -164,6 +164,7 @@ export class BattleManager {
   private readonly battles = new Map<string, MutableBattleGroup>();
   private readonly participantIndex = new Map<string, ParticipantIndexEntry>();
   private readonly leaderTransferHandlers = new Map<string, LeaderTransferHandler>();
+  private readonly fleeSuppression = new Map<string, Set<string>>();
 
   constructor(config: BattleRulesConfig = DEFAULT_BATTLE_RULES_CONFIG) {
     this.config = {
@@ -183,6 +184,31 @@ export class BattleManager {
   /** Remove the leader transfer handler for a specific battle. */
   offLeaderTransfer(battleId: string): void {
     this.leaderTransferHandlers.delete(battleId);
+  }
+
+  /** Record that a participant voluntarily fled from a specific battle. */
+  addFleeSuppression(participantId: string, battleId: string): void {
+    let set = this.fleeSuppression.get(participantId);
+    if (!set) {
+      set = new Set<string>();
+      this.fleeSuppression.set(participantId, set);
+    }
+    set.add(battleId);
+  }
+
+  /** Check if a participant is suppressed from rejoining a specific battle. */
+  isFleeSuppressed(participantId: string, battleId: string): boolean {
+    return this.fleeSuppression.get(participantId)?.has(battleId) ?? false;
+  }
+
+  /** Clear all suppression entries for a given battle (called when battle resolves/is removed). */
+  clearFleeSuppressionForBattle(battleId: string): void {
+    for (const [participantId, set] of this.fleeSuppression) {
+      set.delete(battleId);
+      if (set.size === 0) {
+        this.fleeSuppression.delete(participantId);
+      }
+    }
   }
 
   getBattle(battleId: string): BattleGroup | undefined {
@@ -291,6 +317,7 @@ export class BattleManager {
     this.participantIndex.delete(participantId);
     this.recalculateRadius(side);
     if (wasLeader) this.selectLeader(side);
+    else if (!side.participants.some(isSurvivor)) this.selectLeader(side);
     return { battle: toSnapshotBattle(battle) };
   }
 
@@ -424,6 +451,7 @@ export class BattleManager {
     ].map(({ id }) => id);
     this.battles.delete(battleId);
     this.leaderTransferHandlers.delete(battleId);
+    this.clearFleeSuppressionForBattle(battleId);
     for (const participantId of participantIds) this.participantIndex.delete(participantId);
     return { removedBattleId: battleId };
   }
@@ -512,6 +540,7 @@ export class BattleManager {
           continue;
         }
         if (!isInside) continue;
+        if (this.isFleeSuppressed(candidate.id, battle.id)) continue;
 
         const snapshotParticipant: BattleParticipant = {
           id: candidate.id,

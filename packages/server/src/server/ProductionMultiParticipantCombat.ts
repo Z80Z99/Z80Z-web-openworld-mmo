@@ -288,7 +288,14 @@ export function routeEncounterFlee(
   }
 
   // Full removal from both CombatManager and BattleManager
-  deps.bridge.removeParticipant(lookup.battle.id, playerSessionId);
+  const removeResult = deps.bridge.removeParticipant(lookup.battle.id, playerSessionId);
+
+  if ("error" in removeResult) {
+    return { kind: "combat", success: false };
+  }
+
+  // Record flee suppression to prevent dynamic re-join to same battle
+  deps.battleManager.addFleeSuppression(playerSessionId, lookup.battle.id);
 
   // Notify the fleeing player's client
   const enemyId = lookup.battle.enemySide.participants[0]?.id ?? "";
