@@ -6,7 +6,8 @@ import { NetworkManager } from "./network/index.js";
 import { InputManager, TouchControls } from "./input/index.js";
 import type { InputVector } from "./input/index.js";
 import { GameState } from "./game/index.js";
-import { HUD, CombatUI, IdleUI, MobileUI, QuestUI, CraftingUI, ShopUI, TradeUI, MountUI, TitleUI, TutorialOverlay, ResponsiveLayout, EncounterPanel } from "./ui/index.js";
+import { HUD, CombatUI, IdleUI, MobileUI, QuestUI, CraftingUI, ShopUI, TradeUI, MountUI, TitleUI, TutorialOverlay, ResponsiveLayout, EncounterPanel, BattlePanel, CombatPanel } from "./ui/index.js";
+import type { CombatPanelActionPayload } from "./ui/index.js";
 import { normalizeCombatEvent } from "./combat/CombatEventNormalizer.js";
 import { toEncounterShowPayload, toEncounterUpdatePayload, isTerminalEvent, shouldHideEncounter } from "./combat/EncounterAdapter.js";
 
@@ -186,6 +187,15 @@ async function main() {
     network.sendEncounterAction(action);
   });
 
+  // Battle panel UI (DOM overlay — spatial battle state)
+  const battlePanel = new BattlePanel(container);
+
+  // Combat panel UI (DOM overlay — turn-based combat with actions)
+  const combatPanel = new CombatPanel(container);
+  combatPanel.onAction((payload: CombatPanelActionPayload) => {
+    network.sendEncounterAction(payload.action, payload.targetId);
+  });
+
   // Title display UI (DOM overlay)
   const titleUI = new TitleUI(container);
 
@@ -245,6 +255,92 @@ async function main() {
       // ── Update structured state model (sole mutation path) ──
       gameState.updateCombatFromEvent(normalized);
       gameState.updateBattleFromEvent(normalized);
+
+      // ── Update BattlePanel ──
+      if (gameState.battle && gameState.localPlayer) {
+        const playerParticipants = gameState.battle.playerSide.participants.map((p) => ({
+          id: p.id,
+          name: p.id === gameState.localPlayer!.id ? "You" : p.id.slice(0, 8),
+          currentHp: 100,
+          maxHp: 100,
+          alive: p.state !== "ELIMINATED",
+          fleeing: p.state === "FLEEING",
+          isLeader: gameState.battle!.playerSide.leaderId === p.id,
+        }));
+        const enemyParticipants = gameState.battle.enemySide.participants.map((p) => ({
+          id: p.id,
+          name: p.id.slice(0, 8),
+          currentHp: 100,
+          maxHp: 100,
+          alive: p.state !== "ELIMINATED",
+          fleeing: p.state === "FLEEING",
+          isLeader: gameState.battle!.enemySide.leaderId === p.id,
+        }));
+        battlePanel.show({
+          battleState: gameState.battle.playerSide.state,
+          playerParticipants,
+          enemyParticipants,
+        });
+      }
+
+      // ── Update CombatPanel ──
+      if (gameState.combat && gameState.localPlayer) {
+        const localId = gameState.localPlayer.id;
+        const participants = gameState.combat.participants.map((p) => {
+          const mob = gameState.mobs.get(p.participantId);
+          return {
+            participantId: p.participantId,
+            name: p.participantId === localId ? "You" : (mob?.typeId ?? p.participantId).slice(0, 8),
+            currentHp: p.currentHp,
+            maxHp: p.maxHp,
+            alive: p.alive,
+            defending: p.defending,
+            fleeing: p.fleeing,
+            side: p.side,
+          };
+        });
+        combatPanel.show({
+          combatState: gameState.combat.state,
+          round: gameState.combat.round,
+          currentActorId: gameState.combat.currentActorId,
+          turnOrder: [...gameState.combat.turnOrder],
+          participants,
+          localPlayerId: localId,
+        });
+
+        // Combat log entries from events
+        if (normalized.type === "damage_dealt" || normalized.type === "player_damaged") {
+          const sourceName = normalized.sourceId === localId ? "You" : normalized.sourceId.slice(0, 8);
+          const targetName = normalized.targetId === localId ? "You" : normalized.targetId.slice(0, 8);
+          combatPanel.addLogEntry({
+            text: `${sourceName} dealt ${normalized.damage} to ${targetName}`,
+            timestamp: Date.now(),
+          });
+        }
+        if (normalized.type === "mob_killed") {
+          combatPanel.addLogEntry({ text: `${normalized.targetId.slice(0, 8)} was slain!`, timestamp: Date.now() });
+        }
+        if (normalized.type === "player_died") {
+          combatPanel.addLogEntry({ text: `${normalized.targetId === localId ? "You" : normalized.targetId.slice(0, 8)} have fallen!`, timestamp: Date.now() });
+        }
+        if (normalized.type === "defend") {
+          combatPanel.addLogEntry({ text: `${normalized.sourceId === localId ? "You" : normalized.sourceId.slice(0, 8)} is defending`, timestamp: Date.now() });
+        }
+        if (normalized.type === "encounter_fled") {
+          combatPanel.addLogEntry({ text: `${normalized.sourceId.slice(0, 8)} fled!`, timestamp: Date.now() });
+        }
+        if (normalized.type === "player_damaged") {
+          combatPanel.addLogEntry({ text: `Round ${gameState.combat.round} begins`, timestamp: Date.now() });
+        }
+      }
+
+      // Hide panels when combat/battle ends
+      if (!gameState.combat) {
+        combatPanel.hide();
+      }
+      if (!gameState.battle) {
+        battlePanel.hide();
+      }
 
       // ── Update EncounterPanel via adapter ──
       if (normalized.type === "encounter_started" && gameState.combat && gameState.localPlayer) {

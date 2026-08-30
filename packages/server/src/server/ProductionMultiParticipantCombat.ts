@@ -209,15 +209,29 @@ export type EncounterTargetResult =
  * the enemy-side leader if alive && !fleeing in combat, else the first alive
  * && !fleeing enemy participant. The engine still receives explicit
  * actorId + targetId.
+ *
+ * When an explicit targetId is provided and refers to a valid alive enemy
+ * participant, it is used directly. Otherwise falls back to auto-derivation.
  */
 export function resolveEncounterTarget(
   deps: Pick<ProductionCombatDeps, "battleManager" | "combatManager">,
   playerSessionId: string,
+  targetId?: string,
 ): EncounterTargetResult {
   const lookup = deps.battleManager.getBattleByParticipant(playerSessionId);
   if (!lookup) return { kind: "not-in-combat" };
   const session = deps.combatManager.getCombatSessionByBattle(lookup.battle.id);
   if (!session || session.state !== "ACTIVE") return { kind: "not-in-combat" };
+
+  // If explicit targetId provided, validate it refers to a live enemy participant
+  if (targetId) {
+    const candidate = session.participants.find((p) => p.participantId === targetId);
+    if (candidate && candidate.alive && !candidate.fleeing && candidate.side === "enemy") {
+      return { kind: "combat", session, enemy: candidate, battle: lookup.battle };
+    }
+    // Invalid targetId — fall through to auto-derivation
+  }
+
   const enemy = getCombatEnemyReference(session, lookup.battle);
   if (!enemy) return { kind: "not-in-combat" };
   return { kind: "combat", session, enemy, battle: lookup.battle };

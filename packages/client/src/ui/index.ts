@@ -24,3 +24,14 @@ export { IdleUI } from "./IdleUI.js";
 export type { IdleClaimHandler, IdleUIData } from "./IdleUI.js";
 export { EncounterPanel } from "./EncounterPanel.js";
 export type { EncounterShowPayload, EncounterUpdatePayload, EncounterAction, EncounterActionHandler } from "./EncounterPanel.js";
+export { CombatPanel } from "./CombatPanel.js";
+export type {
+  CombatPanelParticipant,
+  CombatPanelAction,
+  CombatPanelActionPayload,
+  CombatPanelActionHandler,
+  CombatPanelShowPayload,
+  CombatPanelLogEntry,
+} from "./CombatPanel.js";
+export { BattlePanel } from "./BattlePanel.js";
+export type { BattlePanelParticipant, BattlePanelShowPayload } from "./BattlePanel.js";

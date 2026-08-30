@@ -877,7 +877,7 @@ export class GameRoom extends Room<RoomState> {
     // Turn-based encounter action (attack / defend / flee)
     this.onMessage(
       "encounter_action",
-      (client, message: { action: "attack" | "defend" | "flee" }) => {
+      (client, message: { action: "attack" | "defend" | "flee"; targetId?: string }) => {
         if (!message.action) return;
         if (typeof message.action !== "string") return;
 
@@ -893,7 +893,7 @@ export class GameRoom extends Room<RoomState> {
           (message.action === "attack" || message.action === "defend" || message.action === "flee")
         ) {
           if (message.action === "attack") {
-            const routed = routeEncounterAction(this.combatDeps, client.sessionId);
+            const routed = routeEncounterAction(this.combatDeps, client.sessionId, message.targetId);
             if (routed.kind === "combat") {
               if (routed.damage) {
                 const targetMob = this.mobSpawner.getMob(routed.damage.targetId);

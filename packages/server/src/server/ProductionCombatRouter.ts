@@ -285,8 +285,9 @@ export type EncounterActionResult =
 export function routeEncounterAction(
   deps: ProductionCombatDeps,
   playerSessionId: string,
+  targetId?: string,
 ): EncounterActionResult {
-  const resolved = resolveEncounterTarget(deps, playerSessionId);
+  const resolved = resolveEncounterTarget(deps, playerSessionId, targetId);
   if (resolved.kind !== "combat") return { kind: "not-in-combat" };
 
   const { session, enemy } = resolved;

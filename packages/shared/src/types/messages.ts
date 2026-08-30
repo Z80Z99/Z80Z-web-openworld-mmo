@@ -54,6 +54,8 @@ export interface AttackMessage {
 export interface EncounterActionMessage {
   type: "encounter_action";
   action: "attack" | "defend" | "flee";
+  /** Explicit target for multi-enemy encounters. Falls back to auto-derivation when absent or invalid. */
+  targetId?: string;
 }
 
 /** All combat event type names the server currently emits. */
