@@ -5,6 +5,7 @@ import type {
   RoomState,
   ChatMessage,
   ClientMessage,
+  CombatEventPayload,
 } from "@mmo/shared";
 import { GameState } from "../game/GameState.js";
 import { MovementManager } from "./MovementManager.js";
@@ -34,7 +35,7 @@ export interface NetworkCallbacks {
   onEntityAdd?: (entityId: string, entity: EntityState) => void;
   onEntityUpdate?: (entityId: string, entity: EntityState) => void;
   onEntityRemove?: (entityId: string) => void;
-  onCombatEvent?: (event: any) => void;
+  onCombatEvent?: (event: CombatEventPayload) => void;
   onChat?: (sender: string, content: string) => void;
   onError?: (message: string) => void;
   onMountSuccess?: (action: "mount" | "dismount", mountId: string, speed?: number) => void;
@@ -274,7 +275,7 @@ export class NetworkManager {
     });
 
     // Listen for combat events
-    this.room.onMessage("combat_event", (event: any) => {
+    this.room.onMessage("combat_event", (event: CombatEventPayload) => {
       this.callbacks.onCombatEvent?.(event);
     });
 

@@ -1,5 +1,5 @@
 import { Application, Container } from "pixi.js";
-import { MOVE_SPEED, CHUNK_SIZE, DEFAULT_SEED } from "@mmo/shared";
+import { MOVE_SPEED, CHUNK_SIZE, DEFAULT_SEED, type CombatEventPayload } from "@mmo/shared";
 
 import { Camera, TileRenderer, EntityRenderer, MobRenderer, TILE_PX, textureManager } from "./renderer/index.js";
 import { NetworkManager } from "./network/index.js";
@@ -7,6 +7,8 @@ import { InputManager, TouchControls } from "./input/index.js";
 import type { InputVector } from "./input/index.js";
 import { GameState } from "./game/index.js";
 import { HUD, CombatUI, IdleUI, MobileUI, QuestUI, CraftingUI, ShopUI, TradeUI, MountUI, TitleUI, TutorialOverlay, ResponsiveLayout, EncounterPanel } from "./ui/index.js";
+import { normalizeCombatEvent, buildCombatStateFromEncounter } from "./combat/CombatEventNormalizer.js";
+import { toEncounterShowPayload, toEncounterUpdatePayload, isTerminalEvent, findLocalParticipant, findEnemyParticipant } from "./combat/EncounterAdapter.js";
 
 /* ── Configuration ── */
 const SEED = DEFAULT_SEED;
@@ -236,35 +238,46 @@ async function main() {
       mobRenderer.removeMob(entityId);
     },
     onCombatEvent(event) {
-      // ── Turn-based encounter handling ──
-      if (event.type === "encounter_started" && event.mobId) {
-        const mob = gameState.mobs.get(event.mobId);
+      // Normalize raw server event → strongly-typed event
+      const normalized = normalizeCombatEvent(event as any);
+      if (!normalized) return;
+
+      // ── Turn-based encounter handling (via normalizer + adapter) ──
+      if (normalized.type === "encounter_started") {
+        const mob = gameState.mobs.get(normalized.mobId);
         const mobName = mob
           ? mob.typeId.charAt(0).toUpperCase() + mob.typeId.slice(1)
           : "Unknown";
         const mobLevel = mob ? Math.ceil(mob.maxHealth / 20) : 1;
 
         gameState.inEncounter = true;
-        gameState.encounterMobId = event.mobId;
-        gameState.encounterMobHp = event.mobHp ?? 0;
-        gameState.encounterMobMaxHp = event.mobMaxHp ?? 0;
+        gameState.encounterMobId = normalized.mobId;
+        gameState.encounterMobHp = normalized.mobHp;
+        gameState.encounterMobMaxHp = normalized.mobMaxHp;
         gameState.encounterTurn = "player";
         gameState.encounterRound = 1;
 
+        // Update new state model
+        gameState.combat = buildCombatStateFromEncounter(
+          normalized.mobId,
+          normalized.combatId,
+          normalized.currentActorId,
+        );
+
         encounterPanel.show({
-          mobId: event.mobId,
+          mobId: normalized.mobId,
           mobName,
           mobLevel,
-          mobHp: event.mobHp ?? 0,
-          mobMaxHp: event.mobMaxHp ?? 0,
+          mobHp: normalized.mobHp,
+          mobMaxHp: normalized.mobMaxHp,
           turn: "player",
           round: 1,
         });
       }
 
       if (gameState.inEncounter) {
-        if (event.type === "damage_dealt" && typeof event.damage === "number") {
-          gameState.encounterMobHp = Math.max(0, gameState.encounterMobHp - event.damage);
+        if (normalized.type === "damage_dealt") {
+          gameState.encounterMobHp = Math.max(0, gameState.encounterMobHp - normalized.damage);
           gameState.encounterTurn = "mob";
           encounterPanel.update({
             turn: "mob",
@@ -273,7 +286,7 @@ async function main() {
           });
         }
 
-        if (event.type === "player_damaged" && typeof event.damage === "number") {
+        if (normalized.type === "player_damaged") {
           gameState.encounterRound += 1;
           gameState.encounterTurn = "player";
           encounterPanel.update({
@@ -283,26 +296,22 @@ async function main() {
           });
         }
 
-        if (
-          event.type === "mob_killed" ||
-          event.type === "encounter_fled" ||
-          event.type === "player_died"
-        ) {
+        if (isTerminalEvent(normalized.type)) {
           gameState.inEncounter = false;
           gameState.encounterMobId = null;
+          gameState.combat = null;
           encounterPanel.hide();
         }
       }
 
-      // Handle combat events from server
-      if (event.type === "damage_dealt" || event.type === "player_damaged") {
-        const targetId = event.targetId;
-        const isPlayerDamage = event.type === "player_damaged";
+      // Handle combat events from server (damage numbers, XP, etc.)
+      if (normalized.type === "damage_dealt" || normalized.type === "player_damaged") {
+        const targetId = normalized.targetId;
+        const isPlayerDamage = normalized.type === "player_damaged";
 
         let screenPos: { x: number; y: number } | null = null;
 
         if (isPlayerDamage) {
-          // Damage to player — show at player position
           const local = gameState.localPlayer;
           if (local) {
             screenPos = {
@@ -311,10 +320,8 @@ async function main() {
             };
           }
         } else {
-          // Damage to mob — show at mob position
           screenPos = mobRenderer.getMobScreenPosition(targetId);
           if (screenPos) {
-            // Convert world coords to screen coords
             screenPos = {
               x: screenPos.x - camera.x + camera.viewportWidth / 2,
               y: screenPos.y - camera.y + camera.viewportHeight / 2,
@@ -322,11 +329,10 @@ async function main() {
           }
         }
 
-        if (screenPos && event.damage !== undefined) {
-          const prefix = isPlayerDamage ? "-" : "-";
+        if (screenPos) {
           combatUI.addDamageNumber(
             `dmg_${damageCounter++}`,
-            `${prefix}${event.damage}`,
+            `-${normalized.damage}`,
             screenPos.x,
             screenPos.y,
             false,
@@ -334,16 +340,15 @@ async function main() {
         }
       }
 
-      if (event.type === "xp_gained" && event.xp) {
-        gameState.xp += event.xp;
-        // Show XP gain as a floating number
+      if (normalized.type === "xp_gained" && normalized.xp) {
+        gameState.xp += normalized.xp;
         const local = gameState.localPlayer;
         if (local) {
           const screenX = local.x * 16 - camera.x + camera.viewportWidth / 2;
           const screenY = local.y * 16 - camera.y + camera.viewportHeight / 2 - 20;
           combatUI.addDamageNumber(
             `xp_${damageCounter++}`,
-            `+${event.xp} XP`,
+            `+${normalized.xp} XP`,
             screenX,
             screenY,
             true,
@@ -351,35 +356,34 @@ async function main() {
         }
       }
 
-      if (event.type === "mob_killed") {
-        network.sendQuestEvent("kill", event.mobType);
+      if (normalized.type === "mob_killed") {
+        // mobType not in normalized payload — use event.mobType for quest tracking
+        network.sendQuestEvent("kill", event.mobType as string);
       }
 
-      if (event.type === "level_up") {
-        // Server is authoritative: sync level/xp from the payload.
+      if (normalized.type === "level_up") {
         const local = gameState.localPlayer;
         if (local) {
-          if (event.level !== undefined) local.level = event.level;
+          local.level = normalized.level;
           gameState.xp = 0;
         }
         const screenX = (local?.x ?? 0) * 16 - camera.x + camera.viewportWidth / 2;
         const screenY = (local?.y ?? 0) * 16 - camera.y + camera.viewportHeight / 2 - 40;
         combatUI.addDamageNumber(
           `lvl_${damageCounter++}`,
-          `LEVEL UP! ${event.level ?? ""}`,
+          `LEVEL UP! ${normalized.level}`,
           screenX,
           screenY,
           true,
         );
       }
 
-      if (event.type === "player_respawn") {
-        // Server teleports us to spawn with full HP; reset local prediction.
+      if (normalized.type === "player_respawn") {
         const local = gameState.localPlayer;
         if (local) {
           local.x = 0;
           local.y = 0;
-          local.health = event.currentHp ?? local.maxHealth;
+          local.health = normalized.currentHp;
         }
       }
     },
