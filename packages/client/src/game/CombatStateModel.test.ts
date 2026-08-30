@@ -25,7 +25,6 @@ import type {
   CombatSessionState,
 } from "./CombatState.js";
 import { normalizeCombatEvent, buildBattleStateFromEncounter, buildCombatStateFromEncounter } from "../combat/CombatEventNormalizer.js";
-import { toEncounterShowPayload, toEncounterUpdatePayload, shouldHideEncounter, isTerminalEvent, findLocalParticipant, findEnemyParticipant } from "../combat/EncounterAdapter.js";
 
 /* ═══════════════════════════════════════════════════════
  * Helpers
@@ -425,79 +424,5 @@ describe("Phase 3H.3 — Client Battle/Combat State Model (CSM-001..CSM-020)", (
     // Verify readonly types (compile-time check, runtime just verifies structure)
     expect(typeof battle.battleId).toBe("string");
     expect(typeof combat.combatId).toBe("string");
-  });
-});
-
-/* ═══════════════════════════════════════════════════════
- * EncounterAdapter Tests
- * ═══════════════════════════════════════════════════════ */
-
-describe("EncounterAdapter", () => {
-  it("findLocalParticipant returns correct participant", () => {
-    const combat = makeCombat([
-      makeCombatParticipant("player-1", "player"),
-      makeCombatParticipant("mob-1", "enemy"),
-    ]);
-
-    const local = findLocalParticipant(combat, "player-1");
-    expect(local).toBeDefined();
-    expect(local?.participantId).toBe("player-1");
-  });
-
-  it("findEnemyParticipant returns first alive enemy", () => {
-    const combat = makeCombat([
-      makeCombatParticipant("player-1", "player"),
-      makeCombatParticipant("mob-1", "enemy"),
-    ]);
-
-    const enemy = findEnemyParticipant(combat, "player-1");
-    expect(enemy).toBeDefined();
-    expect(enemy?.participantId).toBe("mob-1");
-    expect(enemy?.side).toBe("enemy");
-  });
-
-  it("toEncounterShowPayload maps correctly", () => {
-    const combat = makeCombat([
-      makeCombatParticipant("player-1", "player"),
-      makeCombatParticipant("mob-1", "enemy", { currentHp: 80, maxHp: 100 }),
-    ], { currentActorId: "player-1", round: 3 });
-
-    const payload = toEncounterShowPayload(combat, "player-1", "Goblin", 5);
-    expect(payload).not.toBeNull();
-    expect(payload?.mobId).toBe("mob-1");
-    expect(payload?.mobName).toBe("Goblin");
-    expect(payload?.mobLevel).toBe(5);
-    expect(payload?.mobHp).toBe(80);
-    expect(payload?.mobMaxHp).toBe(100);
-    expect(payload?.turn).toBe("player");
-    expect(payload?.round).toBe(3);
-  });
-
-  it("toEncounterUpdatePayload maps correctly", () => {
-    const combat = makeCombat([
-      makeCombatParticipant("player-1", "player", { defending: true }),
-      makeCombatParticipant("mob-1", "enemy", { currentHp: 60 }),
-    ], { currentActorId: "mob-1", round: 5 });
-
-    const payload = toEncounterUpdatePayload(combat, "player-1");
-    expect(payload).not.toBeNull();
-    expect(payload?.turn).toBe("mob");
-    expect(payload?.round).toBe(5);
-    expect(payload?.mobHp).toBe(60);
-    expect(payload?.playerDefending).toBe(true);
-  });
-
-  it("shouldHideEncounter returns true when combat resolved", () => {
-    const combat = makeCombat([], { state: "RESOLVED" });
-    expect(shouldHideEncounter(combat)).toBe(true);
-  });
-
-  it("isTerminalEvent identifies terminal events", () => {
-    expect(isTerminalEvent("mob_killed")).toBe(true);
-    expect(isTerminalEvent("player_died")).toBe(true);
-    expect(isTerminalEvent("encounter_fled")).toBe(true);
-    expect(isTerminalEvent("encounter_timeout")).toBe(true);
-    expect(isTerminalEvent("damage_dealt")).toBe(false);
-    expect(isTerminalEvent("xp_gained")).toBe(false);
   });
 });

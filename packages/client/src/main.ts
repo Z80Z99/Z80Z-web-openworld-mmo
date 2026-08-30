@@ -6,10 +6,9 @@ import { NetworkManager } from "./network/index.js";
 import { InputManager, TouchControls } from "./input/index.js";
 import type { InputVector } from "./input/index.js";
 import { GameState } from "./game/index.js";
-import { HUD, CombatUI, IdleUI, MobileUI, QuestUI, CraftingUI, ShopUI, TradeUI, MountUI, TitleUI, TutorialOverlay, ResponsiveLayout, EncounterPanel, BattlePanel, CombatPanel } from "./ui/index.js";
+import { HUD, CombatUI, IdleUI, MobileUI, QuestUI, CraftingUI, ShopUI, TradeUI, MountUI, TitleUI, TutorialOverlay, ResponsiveLayout, BattlePanel, CombatPanel } from "./ui/index.js";
 import type { CombatPanelActionPayload } from "./ui/index.js";
 import { normalizeCombatEvent } from "./combat/CombatEventNormalizer.js";
-import { toEncounterShowPayload, toEncounterUpdatePayload, isTerminalEvent, shouldHideEncounter } from "./combat/EncounterAdapter.js";
 
 /* ── Configuration ── */
 const SEED = DEFAULT_SEED;
@@ -181,12 +180,6 @@ async function main() {
     }
   });
 
-  // Encounter panel UI (DOM overlay — turn-based combat)
-  const encounterPanel = new EncounterPanel(container);
-  encounterPanel.onAction((action) => {
-    network.sendEncounterAction(action);
-  });
-
   // Battle panel UI (DOM overlay — spatial battle state)
   const battlePanel = new BattlePanel(container);
 
@@ -340,34 +333,6 @@ async function main() {
       }
       if (!gameState.battle) {
         battlePanel.hide();
-      }
-
-      // ── Update EncounterPanel via adapter ──
-      if (normalized.type === "encounter_started" && gameState.combat && gameState.localPlayer) {
-        const mob = gameState.mobs.get(normalized.mobId);
-        const mobName = mob
-          ? mob.typeId.charAt(0).toUpperCase() + mob.typeId.slice(1)
-          : "Unknown";
-        const mobLevel = mob ? Math.ceil(mob.maxHealth / 20) : 1;
-        const payload = toEncounterShowPayload(
-          gameState.combat,
-          gameState.localPlayer.id,
-          mobName,
-          mobLevel,
-        );
-        if (payload) encounterPanel.show(payload);
-      }
-
-      if (gameState.combat && gameState.localPlayer && !isTerminalEvent(normalized.type)) {
-        const payload = toEncounterUpdatePayload(gameState.combat, gameState.localPlayer.id);
-        if (payload) encounterPanel.update(payload);
-      }
-
-      if (
-        isTerminalEvent(normalized.type) ||
-        (gameState.combat && shouldHideEncounter(gameState.combat))
-      ) {
-        encounterPanel.hide();
       }
 
       // ── UI effects (kept as-is, not state mutations) ──

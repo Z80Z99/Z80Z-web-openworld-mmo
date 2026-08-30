@@ -110,7 +110,7 @@ describe("Battle Events (Non-Existent)", () => {
  * ═══════════════════════════════════════════════════════ */
 
 describe("Combat State Updates", () => {
-  it("CEM-007: encounter_started creates combat + battle + legacy fields", () => {
+  it("CEM-007: encounter_started creates combat + battle state", () => {
     const gs = makeGameState("mob1", 80, 100);
     const raw = {
       type: "encounter_started",
@@ -141,14 +141,6 @@ describe("Combat State Updates", () => {
     // Battle state created
     expect(gs.battle).not.toBeNull();
     expect(gs.battle!.enemySide.leaderId).toBe("mob1");
-
-    // Legacy fields populated
-    expect(gs.inEncounter).toBe(true);
-    expect(gs.encounterMobId).toBe("mob1");
-    expect(gs.encounterMobHp).toBe(80);
-    expect(gs.encounterMobMaxHp).toBe(100);
-    expect(gs.encounterTurn).toBe("player");
-    expect(gs.encounterRound).toBe(1);
   });
 
   it("CEM-008: damage_dealt updates target HP from server currentHp", () => {
@@ -184,7 +176,6 @@ describe("Combat State Updates", () => {
     gs.updateCombatFromEvent(damageEvent);
 
     expect(gs.combat!.participants.find(p => p.participantId === "mob1")!.currentHp).toBe(60);
-    expect(gs.encounterMobHp).toBe(60);
   });
 
   it("CEM-009: player_damaged increments round", () => {
@@ -220,7 +211,6 @@ describe("Combat State Updates", () => {
     gs.updateCombatFromEvent(playerDmgEvent);
 
     expect(gs.combat!.round).toBe(2);
-    expect(gs.encounterRound).toBe(2);
   });
 
   it("CEM-010: damage sets HP from server (not client calculation)", () => {
@@ -257,7 +247,6 @@ describe("Combat State Updates", () => {
 
     // Client uses server's currentHp, not its own calculation
     expect(gs.combat!.participants.find(p => p.participantId === "mob1")!.currentHp).toBe(70);
-    expect(gs.encounterMobHp).toBe(70);
   });
 
   it("CEM-011: mob_killed marks participant dead", () => {
@@ -513,7 +502,6 @@ describe("Idempotence", () => {
 
     // HP is 60, NOT 40 (no double decrement)
     expect(gs.combat!.participants.find(p => p.participantId === "mob1")!.currentHp).toBe(60);
-    expect(gs.encounterMobHp).toBe(60);
   });
 
   it("CEM-018: Duplicate encounter_started — no double participant", () => {
@@ -674,7 +662,6 @@ describe("Flee/Rejoin", () => {
     gs.updateBattleFromEvent(fledEvent);
 
     expect(gs.combat).toBeNull();
-    expect(gs.inEncounter).toBe(false);
   });
 
   it("CEM-022: Spatial fleeing — participant state FLEEING", () => {
@@ -762,40 +749,5 @@ describe("ID Separation", () => {
     // battleId is auto-generated from mobId, combatId comes from server
     expect(gs.battle!.battleId).not.toBe(gs.combat!.combatId);
     expect(gs.combat!.combatId).toBe("combat-xyz");
-  });
-});
-
-/* ═══════════════════════════════════════════════════════
- * CEM-025: Legacy Compatibility
- *
- * Legacy encounter fields must be set from encounter_started.
- * ═══════════════════════════════════════════════════════ */
-
-describe("Legacy Compatibility", () => {
-  it("CEM-025: Legacy fields set from encounter_started", () => {
-    const gs = makeGameState("mob1", 80, 100);
-    const raw = {
-      type: "encounter_started",
-      sourceId: "p1",
-      targetId: "mob1",
-      mobId: "mob1",
-      mobHp: 80,
-      mobMaxHp: 100,
-      playerHp: 100,
-      playerMaxHp: 100,
-      combatId: "combat-abc",
-      currentActorId: "p1",
-    } as any;
-    const normalized = normalizeCombatEvent(raw)!;
-
-    gs.updateCombatFromEvent(normalized);
-    gs.updateBattleFromEvent(normalized);
-
-    expect(gs.inEncounter).toBe(true);
-    expect(gs.encounterMobId).toBe("mob1");
-    expect(gs.encounterMobHp).toBe(80);
-    expect(gs.encounterMobMaxHp).toBe(100);
-    expect(gs.encounterTurn).toBe("player");
-    expect(gs.encounterRound).toBe(1);
   });
 });

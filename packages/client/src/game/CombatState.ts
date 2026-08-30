@@ -36,23 +36,3 @@ export interface ClientCombatState {
 
 /** Null state when no combat is active. */
 export const NO_COMBAT: null = null;
-
-/** Legacy encounter fields for backward compatibility. */
-export interface LegacyEncounterState {
-  readonly inEncounter: boolean;
-  readonly encounterMobId: string | null;
-  readonly encounterMobHp: number;
-  readonly encounterMobMaxHp: number;
-  readonly encounterTurn: "player" | "mob";
-  readonly encounterRound: number;
-}
-
-/** Default legacy encounter state. */
-export const DEFAULT_LEGACY_ENCOUNTER: LegacyEncounterState = {
-  inEncounter: false,
-  encounterMobId: null,
-  encounterMobHp: 0,
-  encounterMobMaxHp: 0,
-  encounterTurn: "player",
-  encounterRound: 0,
-};

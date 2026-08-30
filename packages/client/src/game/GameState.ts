@@ -90,14 +90,6 @@ export class GameState {
   public xp = 0;
   public xpToNextLevel = 100;
 
-  /* ── Turn-based encounter state ── */
-  public inEncounter = false;
-  public encounterMobId: string | null = null;
-  public encounterMobHp = 0;
-  public encounterMobMaxHp = 0;
-  public encounterTurn: "player" | "mob" = "player";
-  public encounterRound = 0;
-
   /* ── Phase 3H.3: New Battle/Combat State ── */
   public battle: ClientBattleState | null = null;
   public combat: ClientCombatState | null = null;
@@ -107,7 +99,6 @@ export class GameState {
   /**
    * Updates combat state from a normalized server event.
    * Sole mutation path for this.combat — all other code must not set it directly.
-   * Also updates legacy encounter fields as derived side-effects.
    */
   updateCombatFromEvent(event: NormalizedCombatEvent): void {
     switch (event.type) {
@@ -117,13 +108,6 @@ export class GameState {
           event.combatId,
           event.currentActorId,
         );
-        // Derived legacy fields
-        this.inEncounter = true;
-        this.encounterMobId = event.mobId;
-        this.encounterMobHp = event.mobHp;
-        this.encounterMobMaxHp = event.mobMaxHp;
-        this.encounterTurn = "player";
-        this.encounterRound = 1;
         break;
       }
 
@@ -136,10 +120,6 @@ export class GameState {
           return p;
         });
         this.combat = { ...this.combat, participants: updated };
-        // Derived legacy: update mob HP if target is the encounter mob
-        if (event.targetId === this.encounterMobId) {
-          this.encounterMobHp = Math.max(0, event.currentHp);
-        }
         break;
       }
 
@@ -152,7 +132,6 @@ export class GameState {
           return p;
         });
         this.combat = { ...this.combat, participants: updated, round: this.combat.round + 1 };
-        this.encounterRound = this.combat.round;
         break;
       }
 
@@ -183,8 +162,6 @@ export class GameState {
       case "encounter_fled": {
         // Terminal: end combat
         this.combat = null;
-        this.inEncounter = false;
-        this.encounterMobId = null;
         break;
       }
 
