@@ -347,60 +347,73 @@ export class GameLoop {
     // NOTE: MobSpawner no longer emits combat events directly.
     // Mob-initiated combat now flows through pendingEncounterTarget → beginEncounter.
 
-    // Begin encounters for mobs that have a pending target
-    for (const [, mob] of this.mobSpawner.getAllMobs()) {
-      if (!mob.pendingEncounterTarget || mob.inEncounter) continue;
+    // Phase 3I-2: When flag ON, ALL Legacy encounter creation is disabled.
+    // Mob-initiated combat flows through ProductionCombatRouter → CombatSession.
+    // When flag OFF, Legacy encounters run normally for emergency rollback.
+    if (!isBattleCombatEnabled()) {
+      // Begin encounters for mobs that have a pending target
+      for (const [, mob] of this.mobSpawner.getAllMobs()) {
+        if (!mob.pendingEncounterTarget || mob.inEncounter) continue;
 
-      // Phase 3G-4A: unconditional ownership guard — a mob owned by a
-      // CombatSession must never begin a Legacy encounter regardless of the
-      // flag. Inert in a fresh flag-OFF process (no sessions → false).
-      if (
-        isMobOwnedByCombat({ battleManager: this.battleManager, combatManager: this.combatManager }, mob.id) ||
-        isPlayerOwnedByCombat({ battleManager: this.battleManager, combatManager: this.combatManager }, mob.pendingEncounterTarget)
-      ) {
-        mob.pendingEncounterTarget = null;
-        continue;
+        // Phase 3G-4A: unconditional ownership guard — a mob owned by a
+        // CombatSession must never begin a Legacy encounter regardless of the
+        // flag. Inert in a fresh flag-OFF process (no sessions → false).
+        if (
+          isMobOwnedByCombat({ battleManager: this.battleManager, combatManager: this.combatManager }, mob.id) ||
+          isPlayerOwnedByCombat({ battleManager: this.battleManager, combatManager: this.combatManager }, mob.pendingEncounterTarget)
+        ) {
+          mob.pendingEncounterTarget = null;
+          continue;
+        }
+
+        const targetSessionId = mob.pendingEncounterTarget;
+        const player = this.room.state.players.get(targetSessionId);
+        if (!player || player.health <= 0) {
+          mob.pendingEncounterTarget = null;
+          continue;
+        }
+
+        // Must be within encounter engage range
+        const dist = Math.hypot(player.x - mob.x, player.y - mob.y);
+        if (dist > 1.6) continue;
+
+        const pStats = this.combatSystem.getPlayerStats(targetSessionId);
+        const result = this.encounterSystem.beginEncounter(
+          targetSessionId,
+          mob.id,
+          "mob",
+          { mobHp: mob.currentHp, mobMaxHp: mob.maxHp, playerHp: player.health, playerMaxHp: player.maxHealth },
+          now,
+        );
+
+        if (result.encounter) {
+          mob.pendingEncounterTarget = null;
+          mob.inEncounter = true;
+          mob.aiState = "fighting";
+          mob.aggroTarget = null;
+
+          const client = this.room.clients.getById(targetSessionId);
+          if (client) {
+            client.send("combat_event", {
+              type: "encounter_started",
+              mobId: mob.id,
+              mobHp: mob.currentHp,
+              mobMaxHp: mob.maxHp,
+              playerHp: player.health,
+              playerMaxHp: player.maxHealth,
+              attack: pStats.attack,
+              defense: pStats.defense,
+              level: player.level,
+            });
+          }
+        }
       }
-
-      const targetSessionId = mob.pendingEncounterTarget;
-      const player = this.room.state.players.get(targetSessionId);
-      if (!player || player.health <= 0) {
-        mob.pendingEncounterTarget = null;
-        continue;
-      }
-
-      // Must be within encounter engage range
-      const dist = Math.hypot(player.x - mob.x, player.y - mob.y);
-      if (dist > 1.6) continue;
-
-      const pStats = this.combatSystem.getPlayerStats(targetSessionId);
-      const result = this.encounterSystem.beginEncounter(
-        targetSessionId,
-        mob.id,
-        "mob",
-        { mobHp: mob.currentHp, mobMaxHp: mob.maxHp, playerHp: player.health, playerMaxHp: player.maxHealth },
-        now,
-      );
-
-      if (result.encounter) {
-        mob.pendingEncounterTarget = null;
-        mob.inEncounter = true;
-        mob.aiState = "fighting";
-        mob.aggroTarget = null;
-
-        const client = this.room.clients.getById(targetSessionId);
-        if (client) {
-          client.send("combat_event", {
-            type: "encounter_started",
-            mobId: mob.id,
-            mobHp: mob.currentHp,
-            mobMaxHp: mob.maxHp,
-            playerHp: player.health,
-            playerMaxHp: player.maxHealth,
-            attack: pStats.attack,
-            defense: pStats.defense,
-            level: player.level,
-          });
+    } else {
+      // Phase 3I-2: Flag ON — drain pendingEncounterTarget to prevent
+      // unbounded accumulation while mob AI still writes to it.
+      for (const [, mob] of this.mobSpawner.getAllMobs()) {
+        if (mob.pendingEncounterTarget) {
+          mob.pendingEncounterTarget = null;
         }
       }
     }

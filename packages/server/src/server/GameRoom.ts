@@ -138,14 +138,18 @@ export class GameRoom extends Room<RoomState> {
     this.mobSpawner = new MobSpawner(this.worldGen, (mobId) => {
       // Remove mob from any active battle
       this.battleManager.removeParticipantByDeath(mobId);
-      const releasedPlayer = this.encounterSystem.endEncounterForMob(mobId);
-      if (releasedPlayer) {
-        const client = this.clients.getById(releasedPlayer);
-        client?.send("combat_event", {
-          type: "encounter_fled",
-          sourceId: mobId,
-          targetId: releasedPlayer,
-        });
+      // Phase 3I-2: Only touch Legacy encounter when flag OFF (rollback mode).
+      // When flag ON, no Legacy encounters exist — skip to keep production clean.
+      if (!isBattleCombatEnabled()) {
+        const releasedPlayer = this.encounterSystem.endEncounterForMob(mobId);
+        if (releasedPlayer) {
+          const client = this.clients.getById(releasedPlayer);
+          client?.send("combat_event", {
+            type: "encounter_fled",
+            sourceId: mobId,
+            targetId: releasedPlayer,
+          });
+        }
       }
     });
 
@@ -400,7 +404,9 @@ export class GameRoom extends Room<RoomState> {
     this.battleManager.removeParticipantByDeath(client.sessionId);
 
     // End any active encounter and release the mob
-    if (this.encounterSystem.hasEncounter(client.sessionId)) {
+    // Phase 3I-2: Only touch Legacy encounter when flag OFF (rollback mode).
+    // When flag ON, no Legacy encounters exist — skip to keep production clean.
+    if (!isBattleCombatEnabled() && this.encounterSystem.hasEncounter(client.sessionId)) {
       const enc = this.encounterSystem.getEncounter(client.sessionId);
       if (enc) {
         this.encounterSystem.endEncounter(enc, "player_died");
@@ -771,7 +777,8 @@ export class GameRoom extends Room<RoomState> {
       if (dist > PLAYER_ATTACK_RANGE) return;
 
       // Already in an encounter — ignore the real-time attack message.
-      if (this.encounterSystem.hasEncounter(client.sessionId)) return;
+      // Phase 3I-2: Guard with flag — when ON, no Legacy encounters exist.
+      if (!isBattleCombatEnabled() && this.encounterSystem.hasEncounter(client.sessionId)) return;
 
       // Phase 3G-2/3G-3: New Combat single ownership — exactly one owner per
       // attack. blocked → combat owns it (no legacy realtime attack); joined →
