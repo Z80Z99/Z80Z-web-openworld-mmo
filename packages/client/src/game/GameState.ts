@@ -9,6 +9,8 @@ import {
 } from "@mmo/shared";
 import type { Chunk } from "@mmo/shared";
 import { WorldGenerator } from "@mmo/shared";
+import type { ClientBattleState } from "./BattleState.js";
+import type { ClientCombatState } from "./CombatState.js";
 
 /** Tile types that block movement (mirrors server's MovementSystem). */
 const BLOCKED_TILES: ReadonlySet<TileType> = new Set([
@@ -90,6 +92,10 @@ export class GameState {
   public encounterMobMaxHp = 0;
   public encounterTurn: "player" | "mob" = "player";
   public encounterRound = 0;
+
+  /* ── Phase 3H.3: New Battle/Combat State ── */
+  public battle: ClientBattleState | null = null;
+  public combat: ClientCombatState | null = null;
 
   /** Client-side chunk prediction generator (seed must match server). */
   private readonly worldGen: WorldGenerator;
