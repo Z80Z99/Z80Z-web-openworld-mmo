@@ -11,6 +11,11 @@ import type { Chunk } from "@mmo/shared";
 import { WorldGenerator } from "@mmo/shared";
 import type { ClientBattleState } from "./BattleState.js";
 import type { ClientCombatState } from "./CombatState.js";
+import type { NormalizedCombatEvent } from "../combat/CombatEventNormalizer.js";
+import {
+  buildCombatStateFromEncounter,
+  buildBattleStateFromEncounter,
+} from "../combat/CombatEventNormalizer.js";
 
 /** Tile types that block movement (mirrors server's MovementSystem). */
 const BLOCKED_TILES: ReadonlySet<TileType> = new Set([
@@ -96,6 +101,204 @@ export class GameState {
   /* ── Phase 3H.3: New Battle/Combat State ── */
   public battle: ClientBattleState | null = null;
   public combat: ClientCombatState | null = null;
+
+  /* ── Phase 3H.4: State Update Methods ── */
+
+  /**
+   * Updates combat state from a normalized server event.
+   * Sole mutation path for this.combat — all other code must not set it directly.
+   * Also updates legacy encounter fields as derived side-effects.
+   */
+  updateCombatFromEvent(event: NormalizedCombatEvent): void {
+    switch (event.type) {
+      case "encounter_started": {
+        this.combat = buildCombatStateFromEncounter(
+          event.mobId,
+          event.combatId,
+          event.currentActorId,
+        );
+        // Derived legacy fields
+        this.inEncounter = true;
+        this.encounterMobId = event.mobId;
+        this.encounterMobHp = event.mobHp;
+        this.encounterMobMaxHp = event.mobMaxHp;
+        this.encounterTurn = "player";
+        this.encounterRound = 1;
+        break;
+      }
+
+      case "damage_dealt": {
+        if (!this.combat) break;
+        const updated = this.combat.participants.map((p) => {
+          if (p.participantId === event.targetId) {
+            return { ...p, currentHp: Math.max(0, event.currentHp), alive: event.currentHp > 0 };
+          }
+          return p;
+        });
+        this.combat = { ...this.combat, participants: updated };
+        // Derived legacy: update mob HP if target is the encounter mob
+        if (event.targetId === this.encounterMobId) {
+          this.encounterMobHp = Math.max(0, event.currentHp);
+        }
+        break;
+      }
+
+      case "player_damaged": {
+        if (!this.combat) break;
+        const updated = this.combat.participants.map((p) => {
+          if (p.participantId === event.targetId) {
+            return { ...p, currentHp: Math.max(0, event.currentHp), alive: event.currentHp > 0 };
+          }
+          return p;
+        });
+        this.combat = { ...this.combat, participants: updated, round: this.combat.round + 1 };
+        this.encounterRound = this.combat.round;
+        break;
+      }
+
+      case "mob_killed": {
+        if (!this.combat) break;
+        const updated = this.combat.participants.map((p) => {
+          if (p.participantId === event.targetId) {
+            return { ...p, alive: false, currentHp: 0 };
+          }
+          return p;
+        });
+        this.combat = { ...this.combat, participants: updated };
+        break;
+      }
+
+      case "player_died": {
+        if (!this.combat) break;
+        const updated = this.combat.participants.map((p) => {
+          if (p.participantId === event.targetId) {
+            return { ...p, alive: false, currentHp: 0 };
+          }
+          return p;
+        });
+        this.combat = { ...this.combat, participants: updated };
+        break;
+      }
+
+      case "encounter_fled": {
+        // Terminal: end combat
+        this.combat = null;
+        this.inEncounter = false;
+        this.encounterMobId = null;
+        break;
+      }
+
+      case "encounter_timeout": {
+        if (!this.combat) break;
+        this.combat = { ...this.combat, state: "RESOLVED" };
+        break;
+      }
+
+      case "xp_gained": {
+        this.xp += event.xp;
+        break;
+      }
+
+      case "level_up": {
+        if (this.localPlayer) {
+          this.localPlayer.level = event.level;
+        }
+        this.xp = 0;
+        break;
+      }
+
+      case "player_respawn": {
+        if (this.localPlayer) {
+          this.localPlayer.x = 0;
+          this.localPlayer.y = 0;
+          this.localPlayer.health = event.currentHp;
+        }
+        break;
+      }
+
+      case "loot_dropped": {
+        // No state change — pass-through for UI consumption
+        break;
+      }
+
+      case "defend": {
+        // No-op: defend affects server-side state only
+        break;
+      }
+    }
+  }
+
+  /**
+   * Updates battle state from a normalized server event.
+   * Sole mutation path for this.battle.
+   */
+  updateBattleFromEvent(event: NormalizedCombatEvent): void {
+    switch (event.type) {
+      case "encounter_started": {
+        // Build battle state from mob position
+        const mob = this.mobs.get(event.mobId);
+        const mobPos = mob ? { x: mob.x, y: mob.y } : { x: 0, y: 0 };
+        const playerPos = this.localPlayer
+          ? { x: this.localPlayer.x, y: this.localPlayer.y }
+          : { x: 0, y: 0 };
+        this.battle = buildBattleStateFromEncounter(event.mobId, mobPos, playerPos);
+        break;
+      }
+
+      case "mob_killed": {
+        if (!this.battle) break;
+        const updatedEnemy = {
+          ...this.battle.enemySide,
+          participants: this.battle.enemySide.participants.map((p) => {
+            if (p.id === event.targetId) {
+              return { ...p, state: "ELIMINATED" as const };
+            }
+            return p;
+          }),
+        };
+        this.battle = { ...this.battle, enemySide: updatedEnemy };
+        break;
+      }
+
+      case "player_died": {
+        if (!this.battle) break;
+        const updatedPlayer = {
+          ...this.battle.playerSide,
+          participants: this.battle.playerSide.participants.map((p) => {
+            if (p.id === event.targetId) {
+              return { ...p, state: "ELIMINATED" as const };
+            }
+            return p;
+          }),
+        };
+        this.battle = { ...this.battle, playerSide: updatedPlayer };
+        break;
+      }
+
+      case "encounter_fled": {
+        if (!this.battle) break;
+        // Mark fled participant as ELIMINATED on the relevant side
+        const updatedEnemy = {
+          ...this.battle.enemySide,
+          participants: this.battle.enemySide.participants.map((p) => {
+            if (p.id === event.sourceId) {
+              return { ...p, state: "ELIMINATED" as const };
+            }
+            return p;
+          }),
+        };
+        this.battle = { ...this.battle, enemySide: updatedEnemy };
+        break;
+      }
+
+      case "encounter_timeout": {
+        // Battle stays ACTIVE — combat resolved doesn't auto-resolve battle
+        break;
+      }
+
+      // All other events: no battle state change
+    }
+  }
 
   /** Client-side chunk prediction generator (seed must match server). */
   private readonly worldGen: WorldGenerator;

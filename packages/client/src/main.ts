@@ -7,8 +7,8 @@ import { InputManager, TouchControls } from "./input/index.js";
 import type { InputVector } from "./input/index.js";
 import { GameState } from "./game/index.js";
 import { HUD, CombatUI, IdleUI, MobileUI, QuestUI, CraftingUI, ShopUI, TradeUI, MountUI, TitleUI, TutorialOverlay, ResponsiveLayout, EncounterPanel } from "./ui/index.js";
-import { normalizeCombatEvent, buildCombatStateFromEncounter } from "./combat/CombatEventNormalizer.js";
-import { toEncounterShowPayload, toEncounterUpdatePayload, isTerminalEvent, findLocalParticipant, findEnemyParticipant } from "./combat/EncounterAdapter.js";
+import { normalizeCombatEvent } from "./combat/CombatEventNormalizer.js";
+import { toEncounterShowPayload, toEncounterUpdatePayload, isTerminalEvent, shouldHideEncounter } from "./combat/EncounterAdapter.js";
 
 /* ── Configuration ── */
 const SEED = DEFAULT_SEED;
@@ -242,73 +242,44 @@ async function main() {
       const normalized = normalizeCombatEvent(event as any);
       if (!normalized) return;
 
-      // ── Turn-based encounter handling (via normalizer + adapter) ──
-      if (normalized.type === "encounter_started") {
+      // ── Update structured state model (sole mutation path) ──
+      gameState.updateCombatFromEvent(normalized);
+      gameState.updateBattleFromEvent(normalized);
+
+      // ── Update EncounterPanel via adapter ──
+      if (normalized.type === "encounter_started" && gameState.combat && gameState.localPlayer) {
         const mob = gameState.mobs.get(normalized.mobId);
         const mobName = mob
           ? mob.typeId.charAt(0).toUpperCase() + mob.typeId.slice(1)
           : "Unknown";
         const mobLevel = mob ? Math.ceil(mob.maxHealth / 20) : 1;
-
-        gameState.inEncounter = true;
-        gameState.encounterMobId = normalized.mobId;
-        gameState.encounterMobHp = normalized.mobHp;
-        gameState.encounterMobMaxHp = normalized.mobMaxHp;
-        gameState.encounterTurn = "player";
-        gameState.encounterRound = 1;
-
-        // Update new state model
-        gameState.combat = buildCombatStateFromEncounter(
-          normalized.mobId,
-          normalized.combatId,
-          normalized.currentActorId,
-        );
-
-        encounterPanel.show({
-          mobId: normalized.mobId,
+        const payload = toEncounterShowPayload(
+          gameState.combat,
+          gameState.localPlayer.id,
           mobName,
           mobLevel,
-          mobHp: normalized.mobHp,
-          mobMaxHp: normalized.mobMaxHp,
-          turn: "player",
-          round: 1,
-        });
+        );
+        if (payload) encounterPanel.show(payload);
       }
 
-      if (gameState.inEncounter) {
-        if (normalized.type === "damage_dealt") {
-          gameState.encounterMobHp = Math.max(0, gameState.encounterMobHp - normalized.damage);
-          gameState.encounterTurn = "mob";
-          encounterPanel.update({
-            turn: "mob",
-            round: gameState.encounterRound,
-            mobHp: gameState.encounterMobHp,
-          });
-        }
-
-        if (normalized.type === "player_damaged") {
-          gameState.encounterRound += 1;
-          gameState.encounterTurn = "player";
-          encounterPanel.update({
-            turn: "player",
-            round: gameState.encounterRound,
-            mobHp: gameState.encounterMobHp,
-          });
-        }
-
-        if (isTerminalEvent(normalized.type)) {
-          gameState.inEncounter = false;
-          gameState.encounterMobId = null;
-          gameState.combat = null;
-          encounterPanel.hide();
-        }
+      if (gameState.combat && gameState.localPlayer && !isTerminalEvent(normalized.type)) {
+        const payload = toEncounterUpdatePayload(gameState.combat, gameState.localPlayer.id);
+        if (payload) encounterPanel.update(payload);
       }
 
-      // Handle combat events from server (damage numbers, XP, etc.)
+      if (
+        isTerminalEvent(normalized.type) ||
+        (gameState.combat && shouldHideEncounter(gameState.combat))
+      ) {
+        encounterPanel.hide();
+      }
+
+      // ── UI effects (kept as-is, not state mutations) ──
+
+      // Floating damage numbers
       if (normalized.type === "damage_dealt" || normalized.type === "player_damaged") {
         const targetId = normalized.targetId;
         const isPlayerDamage = normalized.type === "player_damaged";
-
         let screenPos: { x: number; y: number } | null = null;
 
         if (isPlayerDamage) {
@@ -340,8 +311,8 @@ async function main() {
         }
       }
 
+      // XP display
       if (normalized.type === "xp_gained" && normalized.xp) {
-        gameState.xp += normalized.xp;
         const local = gameState.localPlayer;
         if (local) {
           const screenX = local.x * 16 - camera.x + camera.viewportWidth / 2;
@@ -356,17 +327,14 @@ async function main() {
         }
       }
 
+      // Quest event on mob kill
       if (normalized.type === "mob_killed") {
-        // mobType not in normalized payload — use event.mobType for quest tracking
         network.sendQuestEvent("kill", event.mobType as string);
       }
 
+      // Level up display
       if (normalized.type === "level_up") {
         const local = gameState.localPlayer;
-        if (local) {
-          local.level = normalized.level;
-          gameState.xp = 0;
-        }
         const screenX = (local?.x ?? 0) * 16 - camera.x + camera.viewportWidth / 2;
         const screenY = (local?.y ?? 0) * 16 - camera.y + camera.viewportHeight / 2 - 40;
         combatUI.addDamageNumber(
@@ -376,15 +344,6 @@ async function main() {
           screenY,
           true,
         );
-      }
-
-      if (normalized.type === "player_respawn") {
-        const local = gameState.localPlayer;
-        if (local) {
-          local.x = 0;
-          local.y = 0;
-          local.health = normalized.currentHp;
-        }
       }
     },
     onChat(sender, content) {

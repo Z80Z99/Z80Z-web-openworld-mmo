@@ -101,6 +101,7 @@ export interface NormalizedMobKilled {
   readonly type: "mob_killed";
   readonly sourceId: string;
   readonly targetId: string;
+  readonly mobType?: string;
 }
 
 export interface NormalizedPlayerDied {
@@ -152,6 +153,12 @@ export interface NormalizedLootDropped {
   readonly loot: string[];
 }
 
+export interface NormalizedDefend {
+  readonly type: "defend";
+  readonly sourceId: string;
+  readonly targetId: string;
+}
+
 export type NormalizedCombatEvent =
   | NormalizedEncounterStarted
   | NormalizedDamageDealt
@@ -163,7 +170,8 @@ export type NormalizedCombatEvent =
   | NormalizedXpGained
   | NormalizedLevelUp
   | NormalizedPlayerRespawn
-  | NormalizedLootDropped;
+  | NormalizedLootDropped
+  | NormalizedDefend;
 
 /* ── Normalizer ── */
 
@@ -195,6 +203,8 @@ export function normalizeCombatEvent(raw: RawCombatEvent): NormalizedCombatEvent
       return normalizePlayerRespawn(raw);
     case "loot_dropped":
       return normalizeLootDropped(raw);
+    case "defend":
+      return normalizeDefend(raw);
     default:
       return null;
   }
@@ -243,6 +253,9 @@ function normalizeTerminal(
   type: "mob_killed" | "player_died" | "encounter_fled" | "encounter_timeout",
 ): NormalizedMobKilled | NormalizedPlayerDied | NormalizedEncounterFled | NormalizedEncounterTimeout | null {
   if (!raw.sourceId || !raw.targetId) return null;
+  if (type === "mob_killed") {
+    return { type, sourceId: raw.sourceId, targetId: raw.targetId, mobType: raw.mobType };
+  }
   return { type, sourceId: raw.sourceId, targetId: raw.targetId } as any;
 }
 
@@ -286,6 +299,16 @@ function normalizeLootDropped(raw: RawCombatEvent): NormalizedLootDropped | null
     sourceId: raw.sourceId,
     targetId: raw.targetId,
     loot: raw.loot ?? [],
+  };
+}
+
+function normalizeDefend(raw: RawCombatEvent): NormalizedDefend | null {
+  // defend event has targetId but may lack sourceId (server inconsistency)
+  if (!raw.targetId) return null;
+  return {
+    type: "defend",
+    sourceId: raw.sourceId ?? raw.targetId,
+    targetId: raw.targetId,
   };
 }
 
