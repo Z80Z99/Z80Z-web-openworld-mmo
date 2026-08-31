@@ -9,6 +9,7 @@ import { GameState } from "./game/index.js";
 import { HUD, CombatUI, IdleUI, MobileUI, QuestUI, CraftingUI, ShopUI, TradeUI, MountUI, TitleUI, TutorialOverlay, ResponsiveLayout, BattlePanel, CombatPanel } from "./ui/index.js";
 import type { CombatPanelActionPayload } from "./ui/index.js";
 import { normalizeCombatEvent } from "./combat/CombatEventNormalizer.js";
+import { resolveBattleParticipantHp } from "./game/resolveBattleParticipantHp.js";
 
 /* ── Configuration ── */
 const SEED = DEFAULT_SEED;
@@ -251,24 +252,31 @@ async function main() {
 
       // ── Update BattlePanel ──
       if (gameState.battle && gameState.localPlayer) {
-        const playerParticipants = gameState.battle.playerSide.participants.map((p) => ({
-          id: p.id,
-          name: p.id === gameState.localPlayer!.id ? "You" : p.id.slice(0, 8),
-          currentHp: 100,
-          maxHp: 100,
-          alive: p.state !== "ELIMINATED",
-          fleeing: p.state === "FLEEING",
-          isLeader: gameState.battle!.playerSide.leaderId === p.id,
-        }));
-        const enemyParticipants = gameState.battle.enemySide.participants.map((p) => ({
-          id: p.id,
-          name: p.id.slice(0, 8),
-          currentHp: 100,
-          maxHp: 100,
-          alive: p.state !== "ELIMINATED",
-          fleeing: p.state === "FLEEING",
-          isLeader: gameState.battle!.enemySide.leaderId === p.id,
-        }));
+        const combatParts = gameState.combat?.participants;
+        const playerParticipants = gameState.battle.playerSide.participants.map((p) => {
+          const hp = resolveBattleParticipantHp(p.id, combatParts);
+          return {
+            id: p.id,
+            name: p.id === gameState.localPlayer!.id ? "You" : p.id.slice(0, 8),
+            currentHp: hp.currentHp,
+            maxHp: hp.maxHp,
+            alive: p.state !== "ELIMINATED",
+            fleeing: p.state === "FLEEING",
+            isLeader: gameState.battle!.playerSide.leaderId === p.id,
+          };
+        });
+        const enemyParticipants = gameState.battle.enemySide.participants.map((p) => {
+          const hp = resolveBattleParticipantHp(p.id, combatParts);
+          return {
+            id: p.id,
+            name: p.id.slice(0, 8),
+            currentHp: hp.currentHp,
+            maxHp: hp.maxHp,
+            alive: p.state !== "ELIMINATED",
+            fleeing: p.state === "FLEEING",
+            isLeader: gameState.battle!.enemySide.leaderId === p.id,
+          };
+        });
         battlePanel.show({
           battleState: gameState.battle.playerSide.state,
           playerParticipants,
