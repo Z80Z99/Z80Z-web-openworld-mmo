@@ -1,5 +1,12 @@
 # Phase 3G-4C Pre-Retirement Audit
 
+> **SUPERSEDED — 2026-08-31 (Phase 3I-3B)**
+> The `ENABLE_BATTLE_COMBAT` flag and `EncounterSystem` were **REMOVED** in Phase 3I-3B.
+> New Battle/Combat is the sole production combat path. Emergency rollback is now
+> achieved by **deploying a previous known-good version** (git checkout of a prior
+> tag/commit + redeploy), **NOT** a runtime flag. The audit below is historical and
+> documents what was true at Commit 2e0a036.
+
 **Date**: 2026-08-29
 **Agent**: Sisyphus
 **Scope**: Read-only code audit — zero modifications

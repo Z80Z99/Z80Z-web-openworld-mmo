@@ -56,8 +56,6 @@ function makeMob(id: string, hp: number, overrides: Partial<MobTypeConfig> = {})
     maxHp: config.baseHp,
     aggroTarget: null,
     aiState: "idle",
-    inEncounter: false,
-    pendingEncounterTarget: null,
     patrolTarget: null,
     spawnX: 1,
     spawnY: 0,

@@ -730,10 +730,6 @@ export class GameRoom extends Room<RoomState> {
       const mob = this.mobSpawner.getMob(message.targetId);
       if (!mob || mob.aiState === "dead") return;
 
-      // A mob locked in another player's encounter must not be attackable —
-      // otherwise the encounter owner's combat state can never resolve.
-      if (mob.inEncounter) return;
-
       // Server-authoritative melee range check (silent ignore on miss).
       const PLAYER_ATTACK_RANGE = 2.5;
       const dist = Math.hypot(player.x - mob.x, player.y - mob.y);

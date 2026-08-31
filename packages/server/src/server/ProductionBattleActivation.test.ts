@@ -22,9 +22,8 @@ import {
   type CombatPlayerView,
 } from "./ProductionCombatRouter.js";
 
-/* ═══════════════════════════════════════════════════════
- * Phase 3G-2 — Production 1v1 Battle Activation (PBA-001..024)
- * ═══════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════�? * Phase 3G-2 �?Production 1v1 Battle Activation (PBA-001..024)
+ * ══════════════════════════════════════════════════════�?*/
 
 const point = (x: number, y: number): CombatPoint => ({ x, y });
 
@@ -56,8 +55,6 @@ function makeMob(id: string, hp: number, overrides: Partial<MobTypeConfig> = {})
     maxHp: config.baseHp,
     aggroTarget: null,
     aiState: "idle",
-    inEncounter: false,
-    pendingEncounterTarget: null,
     patrolTarget: null,
     spawnX: 1,
     spawnY: 0,
@@ -157,11 +154,11 @@ function addPlayer(w: World, id: string, health = 100, attack = 10): void {
   ps.defense = 5;
 }
 
-describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
+describe("Phase 3G-2 �?Production 1v1 Battle Activation", () => {
   describe("PBA-002: New path creates battle + combat", () => {
     it("realtime attack routes through the New Combat stack", () => {
       const w = makeWorld();
-      addPlayer(w, "player-1", 100, 100); // high attack → kills in one hit
+      addPlayer(w, "player-1", 100, 100); // high attack �?kills in one hit
       const mob = makeMob("mob-1", 30);
       w.mobs.set(mob.id, mob);
       w.entities.set(mob.id, { health: 30, maxHealth: 30 });
@@ -169,7 +166,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       const r = routeRealtimeAttack(w.deps, "player-1", mob);
       expect(r.kind).toBe("combat");
       expect(r.damage?.targetKilled).toBe(true);
-      // PBA-003: battle created (kill removes the mob from the battle — the
+      // PBA-003: battle created (kill removes the mob from the battle �?the
       // player side still owns the battle, session lookup goes via the player)
       expect(w.bm.getBattles().size).toBe(1);
       const playerBattle = w.bm.getBattleByParticipant("player-1")!.battle;
@@ -232,7 +229,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       routeRealtimeAttack(w.deps, "player-1", mob);
       expect(isMobOwnedByCombat(w.deps, mob.id)).toBe(true);
 
-      // Second realtime attack on the combat-owned mob → blocked (no damage)
+      // Second realtime attack on the combat-owned mob �?blocked (no damage)
       const before = mob.currentHp;
       const r2 = routeRealtimeAttack(w.deps, "player-1", mob);
       expect(r2.kind).toBe("blocked");
@@ -241,7 +238,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
 
     it("PBA-024: resolved combat still blocks until battle cleanup", () => {
       const w = makeWorld();
-      addPlayer(w, "player-1", 100, 10); // low attack — mob survives
+      addPlayer(w, "player-1", 100, 10); // low attack �?mob survives
       const mob = makeMob("mob-1", 30);
       w.mobs.set(mob.id, mob);
       w.entities.set(mob.id, { health: 30, maxHealth: 30 });
@@ -254,7 +251,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       // Simulate combat resolution while the mob is still alive and mapped
       w.cm.setCombatState(session.id, "RESOLVED");
 
-      // Still mapped → still owned (blocks legacy re-attack until cleanup)
+      // Still mapped �?still owned (blocks legacy re-attack until cleanup)
       expect(isMobOwnedByCombat(w.deps, mob.id)).toBe(true);
       expect(routeRealtimeAttack(w.deps, "player-1", mob).kind).toBe("blocked");
 
@@ -275,7 +272,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       w.entities.set(mob.id, { health: 30, maxHealth: 30 });
 
       const r = routeRealtimeAttack(w.deps, "player-1", mob);
-      // calculateDamage(10, 1, 1) = 10*1.1 - 1 = 10 → 30 - 10 = 20 (exactly once, not twice)
+      // calculateDamage(10, 1, 1) = 10*1.1 - 1 = 10 �?30 - 10 = 20 (exactly once, not twice)
       expect(r.kind).toBe("combat");
       expect(r.damage?.damage).toBe(10);
       expect(mob.currentHp).toBe(20); // PBA-013: MobInstance.currentHp is the authority
@@ -286,7 +283,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       addPlayer(w, "player-1", 100, 10);
       const mob = makeMob("mob-1", 30);
       w.mobs.set(mob.id, mob);
-      // Direct CombatSystem call — single processPlayerAttack
+      // Direct CombatSystem call �?single processPlayerAttack
       const events = w.combatSystem.processPlayerAttack("player-1", mob, Date.now(), 1);
       expect(events).not.toBeNull();
       expect(mob.currentHp).toBe(20); // exactly one damage application
@@ -315,9 +312,9 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       w.mobs.set(mob.id, mob);
       w.entities.set(mob.id, { health: 30, maxHealth: 30 });
 
-      routeRealtimeAttack(w.deps, "player-1", mob); // player hits first, turn → mob
+      routeRealtimeAttack(w.deps, "player-1", mob); // player hits first, turn �?mob
       tickCombatEnemyTurns(w.deps, Date.now() + BATTLE_MOB_TURN_DELAY_MS);
-      // mob attack 5, player defense 5, level 1 → calculateDamage(5,1,5)=0.5→1
+      // mob attack 5, player defense 5, level 1 �?calculateDamage(5,1,5)=0.5�?
       expect(w.players.get("player-1")!.health).toBe(99);
       expect(w.events.some((e) => e.type === "player_damaged")).toBe(true);
     });
@@ -331,7 +328,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       w.mobs.set(mob.id, mob);
       w.entities.set(mob.id, { health: 30, maxHealth: 30 });
 
-      // Player not found → ensurePlayerCombat must return null with ZERO side effects
+      // Player not found �?ensurePlayerCombat must return null with ZERO side effects
       const r = routeRealtimeAttack(w.deps, "ghost-player", mob);
       expect(r.kind).toBe("fallback");
       expect(w.bm.getBattles().size).toBe(0);
@@ -341,7 +338,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       expect(mob.aiState).toBe("idle");
     });
 
-    it("ensurePlayerCombat null → caller may safely run Legacy", () => {
+    it("ensurePlayerCombat null �?caller may safely run Legacy", () => {
       const w = makeWorld();
       addPlayer(w, "player-1", 100, 10);
       const mob = makeMob("mob-1", 30);
@@ -402,17 +399,17 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       routeRealtimeAttack(w.deps, "player-1", mob);
       const before = w.players.get("player-1")!.health;
 
-      // Not yet due → no-op
+      // Not yet due �?no-op
       tickCombatEnemyTurns(w.deps, Date.now());
       expect(w.players.get("player-1")!.health).toBe(before);
 
-      // Due → mob attacks once, turn hands back to the player
+      // Due �?mob attacks once, turn hands back to the player
       tickCombatEnemyTurns(w.deps, Date.now() + BATTLE_MOB_TURN_DELAY_MS);
       expect(w.players.get("player-1")!.health).toBeLessThan(before);
       const session = getCombatSessionForMob(w.deps, mob.id)!;
       expect(session.currentActorId).toBe("player-1");
 
-      // Subsequent ticks while it is the player's turn → no mob action
+      // Subsequent ticks while it is the player's turn �?no mob action
       tickCombatEnemyTurns(w.deps, Date.now() + BATTLE_MOB_TURN_DELAY_MS * 2);
       expect(w.players.get("player-1")!.health).toBeLessThan(before);
     });
@@ -430,7 +427,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       const playerBattle = w.bm.getBattleByParticipant("player-1")!.battle;
       const battle = playerBattle;
       expect(w.bm.getBattleByParticipant("player-1")).toBeDefined();
-      // The killed mob is removed from the battle by the kill path — verify its
+      // The killed mob is removed from the battle by the kill path �?verify its
       // reverse index is already cleared, then clean up the battle itself.
       expect(w.bm.getBattleByParticipant(mob.id)).toBeUndefined();
 
@@ -445,14 +442,14 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
   });
 
   /* ── Full 1v1 end-to-end flow (PBA §20) ── */
-  it("E2E: full 1v1 flow — battle→combat→turn→attack→HP→death→reward→cleanup", () => {
+  it("E2E: full 1v1 flow �?battle→combat→turn→attack→HP→death→reward→cleanup", () => {
     const w = makeWorld();
     addPlayer(w, "player-1", 100, 10);
     const mob = makeMob("mob-1", 30);
     w.mobs.set(mob.id, mob);
     w.entities.set(mob.id, { health: 30, maxHealth: 30 });
 
-    // 1. Player attack → battle + combat + encounter_started
+    // 1. Player attack �?battle + combat + encounter_started
     const r1 = routeRealtimeAttack(w.deps, "player-1", mob);
     expect(r1.kind).toBe("combat");
     expect(w.bm.getBattles().size).toBe(1); // PBA-003
@@ -462,21 +459,21 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
     expect(w.events.some((e) => e.type === "encounter_started")).toBe(true); // PBA-016
     expect(mob.currentHp).toBe(20); // damage applied once
 
-    // 2. Mob turn → player damaged
+    // 2. Mob turn �?player damaged
     tickCombatEnemyTurns(w.deps, Date.now() + BATTLE_MOB_TURN_DELAY_MS);
     expect(w.players.get("player-1")!.health).toBe(99);
     expect(w.events.some((e) => e.type === "player_damaged")).toBe(true);
 
-    // 3. Player action (turn-based) → mob damaged
+    // 3. Player action (turn-based) �?mob damaged
     const r2 = routeEncounterAction(w.deps, "player-1");
     expect(r2.kind).toBe("combat");
     expect(mob.currentHp).toBe(10);
 
-    // 4. Mob turn again → player damaged
+    // 4. Mob turn again �?player damaged
     tickCombatEnemyTurns(w.deps, Date.now() + BATTLE_MOB_TURN_DELAY_MS * 2);
     expect(w.players.get("player-1")!.health).toBe(98);
 
-    // 5. Player killing blow → reward + combat resolved
+    // 5. Player killing blow �?reward + combat resolved
     const r3 = routeEncounterAction(w.deps, "player-1");
     expect(r3.damage?.targetKilled).toBe(true);
     expect(w.kills.length).toBe(1); // PBA-012 single reward

@@ -8,7 +8,7 @@ import {
   type MobInstance,
 } from "./CombatSystem.js";
 
-/* ── Test doubles (minimal structural fakes — no mocking library) ── */
+/* ── Test doubles (minimal structural fakes �?no mocking library) ── */
 
 interface WireEvent {
   type: string;
@@ -27,8 +27,6 @@ function makeWolfMob(overrides: Partial<MobInstance> = {}): MobInstance {
     maxHp: wolf.baseHp,
     aggroTarget: null,
     aiState: "idle",
-    inEncounter: false,
-    pendingEncounterTarget: null,
     patrolTarget: null,
     spawnX: 10,
     spawnY: 10,

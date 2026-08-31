@@ -1,5 +1,11 @@
 # Phase 3G-5: Legacy Dependency Audit
 
+> **SUPERSEDED — 2026-08-31 (Phase 3I-3B)**
+> The `ENABLE_BATTLE_COMBAT` flag and `EncounterSystem` were **REMOVED** in Phase 3I-3B.
+> New Battle/Combat is the sole production combat path. Emergency rollback is now
+> achieved by **deploying a previous known-good version**, **NOT** a runtime flag.
+> This audit is historical (Commit c2ca0d0).
+
 ## 1. Current HEAD
 
 | Item | Value |

@@ -211,11 +211,7 @@ export interface MobInstance {
   /** Aggro target session ID, or null if idle. */
   aggroTarget: string | null;
   /** Current AI state. */
-  aiState: "idle" | "patrol" | "chase" | "dead" | "fighting";
-  /** True while the mob is locked in a turn-based encounter. */
-  inEncounter: boolean;
-  /** Session ID of the player this mob will engage on next tick. */
-  pendingEncounterTarget: string | null;
+  aiState: "idle" | "patrol" | "chase" | "dead";
   /** Patrol target position. */
   patrolTarget: { x: number; y: number } | null;
   /** Spawn position (for leash range). */

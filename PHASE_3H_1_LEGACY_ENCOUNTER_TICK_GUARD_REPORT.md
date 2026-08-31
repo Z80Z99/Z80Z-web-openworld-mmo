@@ -1,5 +1,11 @@
 # Phase 3H.1 — Guard Legacy Encounter Tick
 
+> **SUPERSEDED — 2026-08-31 (Phase 3I-3B)**
+> The `tickEncounters` guard documented here was **removed** in Phase 3I-3B along with
+> the entire `EncounterSystem`. New Battle/Combat is the sole production combat path.
+> Emergency rollback is now achieved by **deploying a previous known-good version**,
+> **NOT** a runtime flag. This report is historical (Commit 8ba612f).
+
 ## 1. Current HEAD
 
 - Commit: `8ba612f`

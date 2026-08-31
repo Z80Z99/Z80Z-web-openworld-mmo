@@ -407,8 +407,8 @@ export function tickCombatEnemyTurns(deps: ProductionCombatDeps, now: number): v
 
 /**
  * Release combat-ownership state on mobs when their battle is cleaned up.
- * New Combat never sets mob.inEncounter, but the mob may hold aggro/pending
- * state that must not leak into the post-battle world.
+ * (Phase 3I-3B: Legacy inEncounter/pendingEncounterTarget fields removed —
+ * only aggro + aiState are reset so mob state can't leak post-battle.)
  */
 export function releaseMobCombatState(
   deps: Pick<ProductionCombatDeps, "getMob">,
@@ -417,8 +417,6 @@ export function releaseMobCombatState(
   for (const p of [...battle.enemySide.participants, ...battle.playerSide.participants]) {
     const mob = deps.getMob(p.id);
     if (!mob) continue;
-    mob.inEncounter = false;
-    mob.pendingEncounterTarget = null;
     mob.aggroTarget = null;
     if (mob.aiState !== "dead") mob.aiState = "idle";
   }

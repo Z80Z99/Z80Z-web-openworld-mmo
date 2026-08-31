@@ -8,7 +8,7 @@
  * - Ownership integrity: combat-owned mobs/players never enter a second path
  * - Cleanup: battle/session resources cleaned up on creation failure
  *
- * (Phase 3I-3B: ENABLE_BATTLE_COMBAT removed — these tests validate the
+ * (Phase 3I-3B: ENABLE_BATTLE_COMBAT removed �?these tests validate the
  * post-flag New-Combat-only routing.)
  */
 import { describe, it, expect } from "vitest";
@@ -27,8 +27,8 @@ import {
 } from "./ProductionCombatRouter.js";
 import { emitCombatLog } from "./ProductionCombatLog.js";
 
-/* ══════════════════════════════════════════════════════�? * Shared fixtures (mirrors ProductionCutover.test.ts)
- * ══════════════════════════════════════════════════════�?*/
+/* ══════════════════════════════════════════════════════�? * Shared fixtures (mirrors ProductionCutover.test.ts)
+ * ══════════════════════════════════════════════════════�?*/
 
 const point = (x: number, y: number): CombatPoint => ({ x, y });
 
@@ -60,8 +60,6 @@ function makeMob(id: string, hp: number, overrides: Partial<MobTypeConfig> = {})
     maxHp: config.baseHp,
     aggroTarget: null,
     aiState: "idle",
-    inEncounter: false,
-    pendingEncounterTarget: null,
     patrolTarget: null,
     spawnX: 1,
     spawnY: 0,
@@ -162,26 +160,26 @@ function addPlayer(w: World, id: string, health = 100, attack = 10): void {
   ps.defense = 5;
 }
 
-/* ══════════════════════════════════════════════════════�? * Tests
- * ══════════════════════════════════════════════════════�?*/
+/* ══════════════════════════════════════════════════════�? * Tests
+ * ══════════════════════════════════════════════════════�?*/
 
-describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
+describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
   /* ── Attack handler: block Legacy when flag ON ── */
 
   describe("LFR-001..005: Attack handler fallback blocking", () => {
-    it("LFR-001: flag ON + missing player �?routeRealtimeAttack returns fallback, no Legacy combat", () => {
+    it("LFR-001: flag ON + missing player �?routeRealtimeAttack returns fallback, no Legacy combat", () => {
       const w = makeWorld();
       const mob = makeMob("mob_1", 30);
       w.mobs.set(mob.id, mob);
 
       const r = routeRealtimeAttack(w.deps, "ghost", mob);
       expect(r.kind).toBe("fallback");
-      // No battle or session should exist �?Legacy would not run
+      // No battle or session should exist �?Legacy would not run
       expect(w.bm.getBattles().size).toBe(0);
       expect(w.cm.getAllCombatMappings().length).toBe(0);
     });
 
-    it("LFR-002: flag ON + missing player �?fallback_blocked_attack logged (if GameRoom guard present)", () => {
+    it("LFR-002: flag ON + missing player �?fallback_blocked_attack logged (if GameRoom guard present)", () => {
       // At the router level, ensurePlayerCombat logs creation_failed.
       // The GameRoom attack handler adds fallback_blocked_attack on top.
       // This test validates the router logs creation_failed for player_unavailable.
@@ -196,7 +194,7 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
       expect(fb[0].data.reason).toBe("player_unavailable");
     });
 
-    it("LFR-003: flag ON + battle creation fails �?routeRealtimeAttack returns fallback, battle rolled back", () => {
+    it("LFR-003: flag ON + battle creation fails �?routeRealtimeAttack returns fallback, battle rolled back", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 30);
@@ -218,18 +216,18 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
       (w.bridge as any).beginEncounter = origBegin;
     });
 
-    it("LFR-004: flag OFF + missing player �?routeRealtimeAttack returns fallback (Legacy available)", () => {
+    it("LFR-004: flag OFF + missing player �?routeRealtimeAttack returns fallback (Legacy available)", () => {
       const w = makeWorld();
       const mob = makeMob("mob_1", 30);
       w.mobs.set(mob.id, mob);
 
       const r = routeRealtimeAttack(w.deps, "ghost", mob);
       expect(r.kind).toBe("fallback");
-      // Legacy is available when flag is OFF �?no blocking
+      // Legacy is available when flag is OFF �?no blocking
       expect(w.bm.getBattles().size).toBe(0);
     });
 
-    it("LFR-005: flag ON + successful creation �?kind 'combat', no fallback_blocked log", () => {
+    it("LFR-005: flag ON + successful creation �?kind 'combat', no fallback_blocked log", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 30);
@@ -246,7 +244,7 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
   /* ── Encounter action handler: block Legacy when flag ON ── */
 
   describe("LFR-006..010: Encounter action handler fallback blocking", () => {
-    it("LFR-006: flag ON + routeEncounterAction returns not-in-combat �?'combat' kind, no Legacy", () => {
+    it("LFR-006: flag ON + routeEncounterAction returns not-in-combat �?'combat' kind, no Legacy", () => {
       // When player has no active combat session, routeEncounterAction returns
       // { kind: "not-in-combat" }. At router level this means fallback is possible.
       // GameRoom guard blocks Legacy when flag ON.
@@ -254,11 +252,11 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
       addPlayer(w, "p1", 100, 50);
 
       const r = routeEncounterAction(w.deps, "p1");
-      // Player has no session �?not-in-combat
+      // Player has no session �?not-in-combat
       expect(r.kind).not.toBe("combat");
     });
 
-    it("LFR-007: flag ON + routeEncounterDefend returns not-in-combat �?'not-in-combat', no Legacy", () => {
+    it("LFR-007: flag ON + routeEncounterDefend returns not-in-combat �?'not-in-combat', no Legacy", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
 
@@ -269,7 +267,7 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
       expect(r.kind).not.toBe("combat");
     });
 
-    it("LFR-008: flag OFF + routeEncounterAction �?not-in-combat (Legacy available)", () => {
+    it("LFR-008: flag OFF + routeEncounterAction �?not-in-combat (Legacy available)", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
 
@@ -277,7 +275,7 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
       expect(r.kind).not.toBe("combat");
     });
 
-    it("LFR-009: flag ON + active session �?routeEncounterAction returns combat with damage", () => {
+    it("LFR-009: flag ON + active session �?routeEncounterAction returns combat with damage", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 200, { baseHp: 200 });
@@ -293,7 +291,7 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
       expect(r2.kind).toBe("combat");
     });
 
-    it("LFR-010: flag ON + active session �?routeEncounterDefend returns combat", () => {
+    it("LFR-010: flag ON + active session �?routeEncounterDefend returns combat", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 200, { baseHp: 200 });
@@ -314,7 +312,7 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
   /* ── Emergency rollback ── */
 
   describe("LFR-012: Fallback on missing player", () => {
-    it("LFR-012: missing player �?routeRealtimeAttack fallback is allowed (not blocked)", () => {
+    it("LFR-012: missing player �?routeRealtimeAttack fallback is allowed (not blocked)", () => {
       const w = makeWorld();
       const mob = makeMob("mob_1", 30);
       w.mobs.set(mob.id, mob);
@@ -327,7 +325,7 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
   /* ── Structured logging ── */
 
   describe("LFR-014..016: Structured logging on creation failure", () => {
-    it("LFR-014: player_unavailable �?creation_failed with reason 'player_unavailable'", () => {
+    it("LFR-014: player_unavailable �?creation_failed with reason 'player_unavailable'", () => {
       const w = makeWorld();
       const mob = makeMob("mob_1", 30);
       w.mobs.set(mob.id, mob);
@@ -341,7 +339,7 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
       expect(fb[0].data.targetId).toBe("mob_1");
     });
 
-    it("LFR-015: battle_creation_failed �?creation_failed with reason 'battle_creation_failed'", () => {
+    it("LFR-015: battle_creation_failed �?creation_failed with reason 'battle_creation_failed'", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 30);
@@ -362,7 +360,7 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
       (w.bm as any).createBattle = origCreate;
     });
 
-    it("LFR-016: combat_creation_failed �?creation_failed with reason + battleId", () => {
+    it("LFR-016: combat_creation_failed �?creation_failed with reason + battleId", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 30);
@@ -386,8 +384,8 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
 
   /* ── Ownership integrity ── */
 
-  describe("LFR-017..018: Ownership integrity �?combat-owned never enters Legacy", () => {
-    it("LFR-017: flag ON + mob owned by combat �?routeRealtimeAttack returns blocked (not fallback)", () => {
+  describe("LFR-017..018: Ownership integrity �?combat-owned never enters Legacy", () => {
+    it("LFR-017: flag ON + mob owned by combat �?routeRealtimeAttack returns blocked (not fallback)", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 200, { baseHp: 200 });
@@ -399,14 +397,14 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
       expect(r1.kind).toBe("combat");
       expect(isMobOwnedByCombat(w.deps, mob.id)).toBe(true);
 
-      // Second attack from different player �?join as pending, not fallback
+      // Second attack from different player �?join as pending, not fallback
       addPlayer(w, "p2", 100, 50);
       const r2 = routeRealtimeAttack(w.deps, "p2", mob);
       expect(r2.kind).toBe("joined"); // joins as pending, not fallback
       expect(r2.kind).not.toBe("fallback");
     });
 
-    it("LFR-018: flag ON + player owns combat session �?routeEncounterAction returns combat (not fallback)", () => {
+    it("LFR-018: flag ON + player owns combat session �?routeEncounterAction returns combat (not fallback)", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 200, { baseHp: 200 });
@@ -416,7 +414,7 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
       const r1 = routeRealtimeAttack(w.deps, "p1", mob);
       expect(r1.kind).toBe("combat");
 
-      // Player owns session �?encounter_action routes to combat
+      // Player owns session �?encounter_action routes to combat
       const r2 = routeEncounterAction(w.deps, "p1");
       expect(r2.kind).toBe("combat");
     });
@@ -425,7 +423,7 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
   /* ── Cleanup on failure ── */
 
   describe("LFR-019..020: Cleanup on creation failure", () => {
-    it("LFR-019: beginEncounter failure �?no combat session created, battle removal attempted", () => {
+    it("LFR-019: beginEncounter failure �?no combat session created, battle removal attempted", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 30);
@@ -441,14 +439,14 @@ describe("Phase 3G-4C �?Legacy Fallback Retirement", () => {
       // Critical invariant: no combat session exists (cleanup was attempted)
       expect(w.cm.getCombatSessionByBattle("battle-p1-mob_1")).toBeUndefined();
       // Battle removal was attempted via removeBattle (may not succeed due to
-      // spatial resolution check in BattleManager �?that's OK, the battle will
+      // spatial resolution check in BattleManager �?that's OK, the battle will
       // be cleaned up by GameLoop's disengagement evaluation).
       expect(w.logs.filter((l) => l.event === "creation_failed")).toHaveLength(1);
 
       (w.bridge as any).beginEncounter = origBegin;
     });
 
-    it("LFR-020: battle_creation_failed �?battle not created, no dangling session", () => {
+    it("LFR-020: battle_creation_failed �?battle not created, no dangling session", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 30);

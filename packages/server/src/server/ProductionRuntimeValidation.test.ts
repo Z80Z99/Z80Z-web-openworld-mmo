@@ -42,8 +42,6 @@ function makeMob(id: string, hp: number, overrides: Partial<MobTypeConfig> = {})
     maxHp: config.baseHp,
     aggroTarget: null,
     aiState: "idle",
-    inEncounter: false,
-    pendingEncounterTarget: null,
     patrolTarget: null,
     spawnX: 1,
     spawnY: 0,
@@ -195,7 +193,7 @@ function createAndBegin(w: World, battleId = "battle-1", mobHp = 200, mobBaseHp 
   return mob;
 }
 
-describe("Phase 3G-4B â€” Production Runtime Validation", () => {
+describe("Phase 3G-4B â€?Production Runtime Validation", () => {
   describe("PRV-001..006: Normal Battle Creation", () => {
     it("PRV-001: createBattle returns battle and it exists in getBattles", () => {
       const w = makeWorld();
@@ -745,7 +743,7 @@ describe("Phase 3G-4B â€” Production Runtime Validation", () => {
       );
       w.bridge.beginEncounter("battle-1", mkHpProvider(w));
       const cid = w.cm.getCombatIdByBattle("battle-1")!;
-      // Kill mob_1 via combat action â€” this sets alive=false in the combat session
+      // Kill mob_1 via combat action â€?this sets alive=false in the combat session
       const sp = { getStats: (id: string) => {
         if (id === "p1") return { attack: 100, defense: 5, level: 1 };
         return { attack: 5, defense: 1, level: 1 };
@@ -1032,7 +1030,7 @@ describe("Phase 3G-4B â€” Production Runtime Validation", () => {
   });
 
   describe("PRV-069..070: Full Production Sequence", () => {
-    it("PRV-069: complete 1v1 lifecycle â€” create, combat, kill, cleanup, empty", () => {
+    it("PRV-069: complete 1v1 lifecycle â€?create, combat, kill, cleanup, empty", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 100);
       const mob = makeMob("mob_1", 5, { baseHp: 30 });
@@ -1051,7 +1049,7 @@ describe("Phase 3G-4B â€” Production Runtime Validation", () => {
       expect(isMobOwnedByCombat(w.deps, "mob_1")).toBe(false);
     });
 
-    it("PRV-070: complete multi-player lifecycle â€” 2 players vs 1 mob", () => {
+    it("PRV-070: complete multi-player lifecycle â€?2 players vs 1 mob", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 10);
       addPlayer(w, "p2", 100, 10);
