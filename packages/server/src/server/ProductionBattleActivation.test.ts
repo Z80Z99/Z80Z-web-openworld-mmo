@@ -8,7 +8,7 @@ import { BattleManager } from "./BattleManager.js";
 import { CombatManager } from "./CombatManager.js";
 import { BattleCombatBridge } from "./BattleCombatBridge.js";
 import { CombatSystem, type MobInstance, type MobTypeConfig } from "./CombatSystem.js";
-import { MOB_TURN_DELAY_MS } from "./EncounterSystem.js";
+import { BATTLE_MOB_TURN_DELAY_MS } from "@mmo/shared";
 import {
   isBattleCombatEnabled,
   isMobOwnedByCombat,
@@ -338,7 +338,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       w.entities.set(mob.id, { health: 30, maxHealth: 30 });
 
       routeRealtimeAttack(w.deps, "player-1", mob); // player hits first, turn → mob
-      tickCombatEnemyTurns(w.deps, Date.now() + MOB_TURN_DELAY_MS);
+      tickCombatEnemyTurns(w.deps, Date.now() + BATTLE_MOB_TURN_DELAY_MS);
       // mob attack 5, player defense 5, level 1 → calculateDamage(5,1,5)=0.5→1
       expect(w.players.get("player-1")!.health).toBe(99);
       expect(w.events.some((e) => e.type === "player_damaged")).toBe(true);
@@ -429,13 +429,13 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       expect(w.players.get("player-1")!.health).toBe(before);
 
       // Due → mob attacks once, turn hands back to the player
-      tickCombatEnemyTurns(w.deps, Date.now() + MOB_TURN_DELAY_MS);
+      tickCombatEnemyTurns(w.deps, Date.now() + BATTLE_MOB_TURN_DELAY_MS);
       expect(w.players.get("player-1")!.health).toBeLessThan(before);
       const session = getCombatSessionForMob(w.deps, mob.id)!;
       expect(session.currentActorId).toBe("player-1");
 
       // Subsequent ticks while it is the player's turn → no mob action
-      tickCombatEnemyTurns(w.deps, Date.now() + MOB_TURN_DELAY_MS * 2);
+      tickCombatEnemyTurns(w.deps, Date.now() + BATTLE_MOB_TURN_DELAY_MS * 2);
       expect(w.players.get("player-1")!.health).toBeLessThan(before);
     });
   });
@@ -485,7 +485,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
     expect(mob.currentHp).toBe(20); // damage applied once
 
     // 2. Mob turn → player damaged
-    tickCombatEnemyTurns(w.deps, Date.now() + MOB_TURN_DELAY_MS);
+    tickCombatEnemyTurns(w.deps, Date.now() + BATTLE_MOB_TURN_DELAY_MS);
     expect(w.players.get("player-1")!.health).toBe(99);
     expect(w.events.some((e) => e.type === "player_damaged")).toBe(true);
 
@@ -495,7 +495,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
     expect(mob.currentHp).toBe(10);
 
     // 4. Mob turn again → player damaged
-    tickCombatEnemyTurns(w.deps, Date.now() + MOB_TURN_DELAY_MS * 2);
+    tickCombatEnemyTurns(w.deps, Date.now() + BATTLE_MOB_TURN_DELAY_MS * 2);
     expect(w.players.get("player-1")!.health).toBe(98);
 
     // 5. Player killing blow → reward + combat resolved

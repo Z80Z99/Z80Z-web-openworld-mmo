@@ -3,9 +3,8 @@ import {
   EncounterSystem,
   FLEE_CHANCE,
   MAX_ENCOUNTER_ROUNDS,
-  TURN_TIMEOUT_MS,
-  MOB_TURN_DELAY_MS,
 } from "./EncounterSystem.js";
+import { BATTLE_MOB_TURN_DELAY_MS, BATTLE_TURN_TIMEOUT_MS } from "@mmo/shared";
 
 /* ── Fixtures ── */
 
@@ -43,7 +42,7 @@ function mobTurn(
   const mobLevel = over?.mobLevel ?? 2;
   const playerDefense = over?.playerDefense ?? 5;
   const rng = () => over?.rngValue ?? 0.99;
-  const dueAt = NOW + MOB_TURN_DELAY_MS + 1;
+  const dueAt = NOW + BATTLE_MOB_TURN_DELAY_MS + 1;
   return sys.resolveMobTurn(enc!, { mobAttack, mobLevel, playerDefense }, rng, dueAt);
 }
 
@@ -80,7 +79,7 @@ describe("beginEncounter", () => {
     );
     expect(error).toBeUndefined();
     expect(encounter!.turn).toBe("mob");
-    expect(encounter!.mobTurnScheduledAt).toBe(NOW + MOB_TURN_DELAY_MS);
+    expect(encounter!.mobTurnScheduledAt).toBe(NOW + BATTLE_MOB_TURN_DELAY_MS);
   });
 
   it("5. rejects when the player is already in an encounter", () => {
@@ -132,7 +131,7 @@ describe("playerAction", () => {
     expect(enc!.mobHp).toBe(90);
     expect(enc!.turn).toBe("mob");
     expect(enc!.round).toBe(2);
-    expect(enc!.mobTurnScheduledAt).toBe(NOW + MOB_TURN_DELAY_MS);
+    expect(enc!.mobTurnScheduledAt).toBe(NOW + BATTLE_MOB_TURN_DELAY_MS);
   });
 
   it("8. attack that drops mob hp to 0 ends the encounter with victory", () => {
@@ -272,8 +271,8 @@ describe("tickTimeouts", () => {
     enc = beginPlayerFight(sys);
   });
 
-  it("16. player turn exceeding TURN_TIMEOUT_MS auto-defends", () => {
-    const timedOut = sys.tickTimeouts(NOW + TURN_TIMEOUT_MS + 1);
+  it("16. player turn exceeding BATTLE_TURN_TIMEOUT_MS auto-defends", () => {
+    const timedOut = sys.tickTimeouts(NOW + BATTLE_TURN_TIMEOUT_MS + 1);
     expect(timedOut).toHaveLength(1);
     expect(timedOut[0].playerId).toBe("p1");
     expect(enc!.playerDefending).toBe(true);
@@ -281,7 +280,7 @@ describe("tickTimeouts", () => {
   });
 
   it("does nothing while the player is still within the timeout window", () => {
-    expect(sys.tickTimeouts(NOW + TURN_TIMEOUT_MS - 1)).toHaveLength(0);
+    expect(sys.tickTimeouts(NOW + BATTLE_TURN_TIMEOUT_MS - 1)).toHaveLength(0);
     expect(enc!.turn).toBe("player");
   });
 });

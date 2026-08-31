@@ -20,3 +20,14 @@ export const DEFAULT_BATTLE_RULES_CONFIG: BattleRulesConfig = {
     cautiousEngageRatio: 1,
   },
 } as const;
+
+/* ── Phase 3I-3B: Battle turn timing constants ──
+ *
+ * Migrated from the removed EncounterSystem (formerly TURN_TIMEOUT_MS /
+ * MOB_TURN_DELAY_MS). Renamed to New Combat semantic names. Values kept
+ * byte-identical so existing turn/timing behavior is preserved.
+ */
+/** Player turn timeout in ms — auto-defends when exceeded. */
+export const BATTLE_TURN_TIMEOUT_MS = 12_000;
+/** Delay before a mob's first turn after a combat starts (in ms). */
+export const BATTLE_MOB_TURN_DELAY_MS = 800;

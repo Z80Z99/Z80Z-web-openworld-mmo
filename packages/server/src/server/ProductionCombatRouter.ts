@@ -27,7 +27,7 @@ import type { BattleManager } from "./BattleManager.js";
 import type { CombatManager } from "./CombatManager.js";
 import type { BattleCombatBridge } from "./BattleCombatBridge.js";
 import type { CombatSystem, MobInstance } from "./CombatSystem.js";
-import { TURN_TIMEOUT_MS } from "./EncounterSystem.js";
+import { BATTLE_TURN_TIMEOUT_MS } from "@mmo/shared";
 import { emitCombatLog, type CombatLogDeps } from "./ProductionCombatLog.js";
 import {
   buildStatsProvider,
@@ -150,7 +150,7 @@ export function getBattleForMob(
  * Returns the ACTIVE session, or `null` when creation failed WITHOUT any side
  * effect (no damage, no event, battle rolled back if created here) — safe for
  * the caller to fall back to the Legacy path (PBA-020/021).
- * Passes TURN_TIMEOUT_MS so production turn timeout is active (MP-022..024).
+ * Passes BATTLE_TURN_TIMEOUT_MS so production turn timeout is active (MP-022..024).
  */
 export function ensurePlayerCombat(
   deps: ProductionCombatDeps,
@@ -199,7 +199,7 @@ export function ensurePlayerCombat(
       battle.id,
       { getHp: deps.getHp },
       undefined,
-      TURN_TIMEOUT_MS,
+      BATTLE_TURN_TIMEOUT_MS,
     );
     if ("error" in begin) {
       // No damage / no event produced yet — roll back only what we created here.

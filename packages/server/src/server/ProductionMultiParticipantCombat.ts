@@ -6,7 +6,7 @@
  *  - dynamic join of a player attacking a combat-owned mob (pending policy)
  *  - enemy-target derivation for the old client (explicit at the engine)
  *  - defend routing (defending=true + advanceTurn, no new damage formula)
- *  - turn timeout threading (TURN_TIMEOUT_MS via beginEncounter)
+ *  - turn timeout threading (BATTLE_TURN_TIMEOUT_MS via beginEncounter)
  *  - joined-player notification (encounter_started dedup via combatNotifiedPlayers)
  *  - aggro-aware enemy turns + mob combat-state release
  *
@@ -26,7 +26,7 @@ import type { BattleManager } from "./BattleManager.js";
 import type { CombatManager } from "./CombatManager.js";
 import type { BattleCombatBridge } from "./BattleCombatBridge.js";
 import type { CombatSystem, MobInstance } from "./CombatSystem.js";
-import { MOB_TURN_DELAY_MS } from "./EncounterSystem.js";
+import { BATTLE_MOB_TURN_DELAY_MS } from "@mmo/shared";
 import type { ProductionCombatDeps } from "./ProductionCombatRouter.js";
 
 /* ── Participant construction ── */
@@ -362,7 +362,7 @@ export function tickCombatEnemyTurns(deps: ProductionCombatDeps, now: number): v
       (p) => p.participantId === session.currentActorId,
     );
     if (!actor || actor.side !== "enemy") continue;
-    if (now - (session.turnStartedAt ?? 0) < MOB_TURN_DELAY_MS) continue;
+    if (now - (session.turnStartedAt ?? 0) < BATTLE_MOB_TURN_DELAY_MS) continue;
 
     const mob = deps.getMob(actor.participantId);
     if (!mob) continue;

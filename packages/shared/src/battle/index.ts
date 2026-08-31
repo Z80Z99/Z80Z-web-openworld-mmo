@@ -1,4 +1,8 @@
-export { DEFAULT_BATTLE_RULES_CONFIG } from "./constants.js";
+export {
+  DEFAULT_BATTLE_RULES_CONFIG,
+  BATTLE_TURN_TIMEOUT_MS,
+  BATTLE_MOB_TURN_DELAY_MS,
+} from "./constants.js";
 export {
   distanceSquared,
   isPointInsideBattleArea,

@@ -8,7 +8,7 @@ import { BattleManager } from "./BattleManager.js";
 import { CombatManager } from "./CombatManager.js";
 import { BattleCombatBridge } from "./BattleCombatBridge.js";
 import { CombatSystem, type MobInstance, type MobTypeConfig } from "./CombatSystem.js";
-import { MOB_TURN_DELAY_MS, TURN_TIMEOUT_MS } from "./EncounterSystem.js";
+import { BATTLE_MOB_TURN_DELAY_MS, BATTLE_TURN_TIMEOUT_MS } from "@mmo/shared";
 import {
   isMobOwnedByCombat,
   routeRealtimeAttack,
@@ -177,7 +177,7 @@ function addMob(w: World, id: string, hp = 30, x = 1, y = 0): MobInstance {
 
 /** Drive a round boundary flush: enemy turn wraps to index 0 → pending flush. */
 function driveRoundBoundary(w: World, now = Date.now()): void {
-  tickCombatEnemyTurns(w.deps, now + MOB_TURN_DELAY_MS);
+  tickCombatEnemyTurns(w.deps, now + BATTLE_MOB_TURN_DELAY_MS);
 }
 
 /** Mirror of GameLoop's auto-join: battle membership + combat sync (pending). */
@@ -630,17 +630,17 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       expect(after.round).toBe(before);
     });
 
-    it("MP-022: production session carries TURN_TIMEOUT_MS and timeout auto-defends + advances", () => {
+    it("MP-022: production session carries BATTLE_TURN_TIMEOUT_MS and timeout auto-defends + advances", () => {
       const w = makeWorld();
       addPlayer(w, "player-A");
       const x = addMob(w, "mob-X");
       routeRealtimeAttack(w.deps, "player-A", x);
       const battle = w.bm.getBattleByParticipant("player-A")!.battle;
       const session = w.cm.getCombatSessionByBattle(battle.id)!;
-      expect(session.turnTimeoutMs).toBe(TURN_TIMEOUT_MS); // threaded through beginEncounter
+      expect(session.turnTimeoutMs).toBe(BATTLE_TURN_TIMEOUT_MS); // threaded through beginEncounter
 
       const currentActor = session.currentActorId;
-      w.cm.evaluateTurnTimeout(session.id, Date.now() + TURN_TIMEOUT_MS + 1);
+      w.cm.evaluateTurnTimeout(session.id, Date.now() + BATTLE_TURN_TIMEOUT_MS + 1);
       const after = w.cm.getCombatSessionByBattle(battle.id)!;
       const actor = after.participants.find((p) => p.participantId === currentActor)!;
       expect(actor.defending).toBe(true); // auto-defend
@@ -677,7 +677,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       expect(begin.session.turnTimeoutMs).toBeNull();
 
       const before = begin.session.currentActorId;
-      w.cm.evaluateTurnTimeout(begin.session.id, Date.now() + TURN_TIMEOUT_MS + 1);
+      w.cm.evaluateTurnTimeout(begin.session.id, Date.now() + BATTLE_TURN_TIMEOUT_MS + 1);
       const after = w.cm.getCombatSession(begin.session.id)!;
       expect(after.currentActorId).toBe(before); // no timeout → no-op
     });
