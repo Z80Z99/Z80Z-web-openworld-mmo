@@ -5,7 +5,7 @@ import { AOIManager } from "./AOI.js";
 import { MovementSystem } from "./MovementSystem.js";
 import type { MovementCommand } from "./MovementSystem.js";
 import { CombatSystem } from "./CombatSystem.js";
-import { EncounterSystem, MOB_TURN_DELAY_MS } from "./EncounterSystem.js";
+import { EncounterSystem } from "./EncounterSystem.js";
 import { MobSpawner } from "./MobSpawner.js";
 import { BattleManager } from "./BattleManager.js";
 import { CombatManager } from "./CombatManager.js";
