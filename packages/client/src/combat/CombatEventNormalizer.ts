@@ -56,10 +56,6 @@ export interface RawCombatEvent {
   readonly attack?: number;
   readonly defense?: number;
   readonly mobId?: string;
-  readonly mobHp?: number;
-  readonly mobMaxHp?: number;
-  readonly playerHp?: number;
-  readonly playerMaxHp?: number;
   readonly reason?: string;
   readonly round?: number;
   readonly combatId?: string;
@@ -71,10 +67,6 @@ export interface RawCombatEvent {
 export interface NormalizedEncounterStarted {
   readonly type: "encounter_started";
   readonly mobId: string;
-  readonly mobHp: number;
-  readonly mobMaxHp: number;
-  readonly playerHp: number;
-  readonly playerMaxHp: number;
   readonly combatId: string | null;
   readonly currentActorId: string | null;
 }
@@ -215,10 +207,6 @@ function normalizeEncounterStarted(raw: RawCombatEvent): NormalizedEncounterStar
   return {
     type: "encounter_started",
     mobId: raw.mobId,
-    mobHp: raw.mobHp ?? 0,
-    mobMaxHp: raw.mobMaxHp ?? 0,
-    playerHp: raw.playerHp ?? 0,
-    playerMaxHp: raw.playerMaxHp ?? 0,
     combatId: raw.combatId ?? null,
     currentActorId: raw.currentActorId ?? null,
   };

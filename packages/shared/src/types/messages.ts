@@ -94,10 +94,6 @@ export interface CombatEventPayload {
   defense?: number;
   /** encounter_started: the mob involved. */
   mobId?: string;
-  mobHp?: number;
-  mobMaxHp?: number;
-  playerHp?: number;
-  playerMaxHp?: number;
   /** Terminal encounter events (victory/fled/player_died/timeout). */
   reason?: string;
   /** Current encounter round. */

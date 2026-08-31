@@ -120,10 +120,6 @@ describe("CLR-011..014: updateCombatFromEvent No Legacy Writes", () => {
       sourceId: "p1",
       targetId: "mob1",
       mobId: "mob1",
-      mobHp: 80,
-      mobMaxHp: 100,
-      playerHp: 100,
-      playerMaxHp: 100,
       combatId: "combat-abc",
       currentActorId: "p1",
     } as any;
@@ -151,10 +147,6 @@ describe("CLR-011..014: updateCombatFromEvent No Legacy Writes", () => {
       sourceId: "p1",
       targetId: "mob1",
       mobId: "mob1",
-      mobHp: 80,
-      mobMaxHp: 100,
-      playerHp: 100,
-      playerMaxHp: 100,
       combatId: "combat-abc",
       currentActorId: "p1",
     } as any;
@@ -190,10 +182,6 @@ describe("CLR-011..014: updateCombatFromEvent No Legacy Writes", () => {
       sourceId: "p1",
       targetId: "mob1",
       mobId: "mob1",
-      mobHp: 80,
-      mobMaxHp: 100,
-      playerHp: 100,
-      playerMaxHp: 100,
       combatId: "combat-abc",
       currentActorId: "p1",
     } as any;
@@ -228,10 +216,6 @@ describe("CLR-011..014: updateCombatFromEvent No Legacy Writes", () => {
       sourceId: "p1",
       targetId: "mob1",
       mobId: "mob1",
-      mobHp: 80,
-      mobMaxHp: 100,
-      playerHp: 100,
-      playerMaxHp: 100,
       combatId: "combat-abc",
       currentActorId: "p1",
     } as any;

@@ -101,26 +101,13 @@ export function getCombatEnemyReference(
 }
 
 export function buildCombatStartedPayload(
-  deps: Pick<ProductionCombatDeps, "getPlayer" | "getHp" | "combatSystem">,
-  playerSessionId: string,
   session: CombatSession,
   battle: BattleGroup,
 ): { type: string; [key: string]: unknown } {
-  const player = deps.getPlayer(playerSessionId);
-  const pStats = deps.combatSystem.getPlayerStats(playerSessionId);
   const enemy = getCombatEnemyReference(session, battle);
-  const enemyHp = enemy ? deps.getHp(enemy.participantId) : undefined;
   return {
     type: "encounter_started",
     mobId: enemy?.participantId ?? "",
-    mobHp: enemyHp?.currentHp ?? 0,
-    mobMaxHp: enemyHp?.maxHp ?? 0,
-    playerHp: player?.health ?? 0,
-    playerMaxHp: player?.maxHealth ?? 0,
-    attack: pStats.attack,
-    defense: pStats.defense,
-    level: player?.level ?? 1,
-    // Additive fields — the old client reads only the six above.
     combatId: session.id,
     currentActorId: session.currentActorId,
   };
@@ -193,7 +180,7 @@ export function joinAttackerToCombat(
   const combatSession = deps.combatManager.getCombatSessionByBattle(battle.id);
   if (!combatSession) return false;
 
-  deps.sendCombatEvent(playerSessionId, buildCombatStartedPayload(deps, playerSessionId, combatSession, battle));
+  deps.sendCombatEvent(playerSessionId, buildCombatStartedPayload(combatSession, battle));
   markCombatNotified(deps, combatSession.id, playerSessionId);
   mob.aggroTarget = playerSessionId;
   return true;
@@ -331,7 +318,7 @@ export function routeEncounterFlee(
  * Covers players auto-joined by GameLoop's dynamic-membership sync.
  */
 export function notifyCombatJoinedPlayers(
-  deps: Pick<ProductionCombatDeps, "battleManager" | "combatManager" | "getHp" | "getPlayer" | "combatSystem" | "sendCombatEvent" | "combatNotifiedPlayers">,
+  deps: Pick<ProductionCombatDeps, "battleManager" | "combatManager" | "sendCombatEvent" | "combatNotifiedPlayers">,
   session: CombatSession,
 ): void {
   if (session.state !== "ACTIVE") return;
@@ -342,7 +329,7 @@ export function notifyCombatJoinedPlayers(
     if (p.side !== "player" || !p.alive) continue;
     const notified = deps.combatNotifiedPlayers?.get(session.id);
     if (notified?.has(p.participantId)) continue;
-    deps.sendCombatEvent(p.participantId, buildCombatStartedPayload(deps, p.participantId, session, battle));
+    deps.sendCombatEvent(p.participantId, buildCombatStartedPayload(session, battle));
     markCombatNotified(deps, session.id, p.participantId);
   }
 }

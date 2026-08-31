@@ -203,7 +203,7 @@ export function ensurePlayerCombat(
     emitCombatLog(deps, "new_combat_started", { playerId: playerSessionId, battleId: battle.id, combatId: session.id });
     deps.sendCombatEvent(
       playerSessionId,
-      buildCombatStartedPayload(deps, playerSessionId, session, battle),
+      buildCombatStartedPayload(session, battle),
     );
     markCombatNotified(deps, session.id, playerSessionId);
   }

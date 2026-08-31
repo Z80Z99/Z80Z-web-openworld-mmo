@@ -23,8 +23,8 @@ import {
 } from "./ProductionCombatRouter.js";
 import { emitCombatLog, emitBattleCleanup } from "./ProductionCombatLog.js";
 
-/* ══════════════════════════════════════════════════════�? * Shared fixtures (mirrors PBA makeWorld exactly)
- * ══════════════════════════════════════════════════════�?*/
+/* ══════════════════════════════════════════════════════�? * Shared fixtures (mirrors PBA makeWorld exactly)
+ * ══════════════════════════════════════════════════════�?*/
 
 const point = (x: number, y: number): CombatPoint => ({ x, y });
 
@@ -156,27 +156,27 @@ function addPlayer(w: World, id: string, health = 100, attack = 10): void {
   ps.defense = 5;
 }
 
-/* ══════════════════════════════════════════════════════�? * Tests
- * ══════════════════════════════════════════════════════�?*/
+/* ══════════════════════════════════════════════════════�? * Tests
+ * ══════════════════════════════════════════════════════�?*/
 
-describe("Phase 3G-4A �?Production Cutover Preparation", () => {
+describe("Phase 3G-4A �?Production Cutover Preparation", () => {
   afterEach(() => {
   });
 
   /* ── Flag semantics ── */
 
   describe("CUT-001..003: Flag semantics (New Combat default ON)", () => {
-    it("CUT-001: unset �?New (default ON)", () => {
+    it("CUT-001: unset �?New (default ON)", () => {
     });
 
-    it("CUT-003: 'true' �?New (explicit ON)", () => {
+    it("CUT-003: 'true' �?New (explicit ON)", () => {
     });
   });
 
   /* ── Fallback classification ── */
 
   describe("CUT-004..007: Fallback classification", () => {
-    it("CUT-004: successful creation �?kind 'combat', logs new_battle_started + new_combat_started, no legacy", () => {
+    it("CUT-004: successful creation �?kind 'combat', logs new_battle_started + new_combat_started, no legacy", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 30, { baseHp: 30 });
@@ -191,7 +191,7 @@ describe("Phase 3G-4A �?Production Cutover Preparation", () => {
       expect(w.logs.map((l) => l.event)).not.toContain("creation_failed");
     });
 
-    it("CUT-005: player missing �?kind 'fallback', no battle/session, reason player_unavailable", () => {
+    it("CUT-005: player missing �?kind 'fallback', no battle/session, reason player_unavailable", () => {
       const w = makeWorld();
       const mob = makeMob("mob_1", 30);
       w.mobs.set(mob.id, mob);
@@ -206,7 +206,7 @@ describe("Phase 3G-4A �?Production Cutover Preparation", () => {
       expect(fb[0].data.targetId).toBe("mob_1");
     });
 
-    it("CUT-006: beginEncounter failure �?battle rolled back, reason combat_creation_failed", () => {
+    it("CUT-006: beginEncounter failure �?battle rolled back, reason combat_creation_failed", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 30);
@@ -219,7 +219,7 @@ describe("Phase 3G-4A �?Production Cutover Preparation", () => {
 
       const r = routeRealtimeAttack(w.deps, "p1", mob);
       expect(r.kind).toBe("fallback");
-      // Battle was created but removeBattle may fail silently (spatial check) �?      // the critical invariant is no session exists + correct fallback reason.
+      // Battle was created but removeBattle may fail silently (spatial check) �?      // the critical invariant is no session exists + correct fallback reason.
       const session = w.cm.getCombatSessionByBattle("battle-p1-mob_1");
       expect(session).toBeUndefined();
       const fb = w.logs.filter((l) => l.event === "creation_failed");
@@ -231,7 +231,7 @@ describe("Phase 3G-4A �?Production Cutover Preparation", () => {
       (w.bridge as any).beginEncounter = origBegin;
     });
 
-    it("CUT-007: post-combat-creation failure �?kind 'combat' (NOT fallback), no creation_failed", () => {
+    it("CUT-007: post-combat-creation failure �?kind 'combat' (NOT fallback), no creation_failed", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 100);
@@ -242,7 +242,7 @@ describe("Phase 3G-4A �?Production Cutover Preparation", () => {
       const r1 = routeRealtimeAttack(w.deps, "p1", mob);
       expect(r1.kind).toBe("combat");
 
-      // Second attack: player is participant �?blocked (not fallback)
+      // Second attack: player is participant �?blocked (not fallback)
       const r2 = routeRealtimeAttack(w.deps, "p1", mob);
       expect(r2.kind).toBe("blocked");
       expect(w.logs.map((l) => l.event)).not.toContain("creation_failed");
@@ -251,8 +251,8 @@ describe("Phase 3G-4A �?Production Cutover Preparation", () => {
 
   /* ── Damage/death/reward never legacy ── */
 
-  describe("CUT-008..014: Single ownership �?damage/death/reward", () => {
-    it("CUT-008: after damage in New path �?second attack blocked, not legacy", () => {
+  describe("CUT-008..014: Single ownership �?damage/death/reward", () => {
+    it("CUT-008: after damage in New path �?second attack blocked, not legacy", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 100);
@@ -289,7 +289,7 @@ describe("Phase 3G-4A �?Production Cutover Preparation", () => {
       expect(mob.aiState).toBe("dead");
     });
 
-    it("CUT-011: ownership flag-independent �?session exists �?owned", () => {
+    it("CUT-011: ownership flag-independent �?session exists �?owned", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 100);
@@ -313,7 +313,7 @@ describe("Phase 3G-4A �?Production Cutover Preparation", () => {
       const sizeAfterFirst = w.bm.getBattles().size;
 
       routeRealtimeAttack(w.deps, "p2", mob);
-      // Second player joins the same battle �?still 1 battle
+      // Second player joins the same battle �?still 1 battle
       expect(w.bm.getBattles().size).toBe(sizeAfterFirst);
     });
 
@@ -389,7 +389,7 @@ describe("Phase 3G-4A �?Production Cutover Preparation", () => {
       expect(r.kind).toBe("combat");
       expect(isMobOwnedByCombat(w.deps, "mob_1")).toBe(true);
 
-      // Ownership still held (session exists �?ownership is flag-independent)
+      // Ownership still held (session exists �?ownership is flag-independent)
       expect(isMobOwnedByCombat(w.deps, "mob_1")).toBe(true);
 
       // Cleanup: remove session + battle (as GameLoop would)
@@ -403,10 +403,10 @@ describe("Phase 3G-4A �?Production Cutover Preparation", () => {
     });
   });
 
-  /* ── encounter_started compat payload ── */
+  /* ── encounter_started core payload ── */
 
-  describe("CUT-018: encounter_started compat payload", () => {
-    it("sends encounter_started with legacy fields", () => {
+  describe("CUT-018: encounter_started core payload", () => {
+    it("sends encounter_started with core initialization fields", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 30);
@@ -417,10 +417,8 @@ describe("Phase 3G-4A �?Production Cutover Preparation", () => {
       const encEvent = w.events.find((e) => e.type === "encounter_started");
       expect(encEvent).toBeDefined();
       expect(encEvent!.mobId).toBe("mob_1");
-      expect(typeof encEvent!.mobHp).toBe("number");
-      expect(typeof encEvent!.mobMaxHp).toBe("number");
-      expect(typeof encEvent!.playerHp).toBe("number");
-      expect(typeof encEvent!.playerMaxHp).toBe("number");
+      expect(typeof encEvent!.combatId).toBe("string");
+      expect(typeof encEvent!.currentActorId).toBe("string");
     });
   });
 
@@ -452,7 +450,7 @@ describe("Phase 3G-4A �?Production Cutover Preparation", () => {
   });
 
   describe("CUT-020: production 2v2 E2E under default ON", () => {
-    it("2 players vs 1 mob �?join as pending �?cleanup", () => {
+    it("2 players vs 1 mob �?join as pending �?cleanup", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       addPlayer(w, "p2", 100, 50);

@@ -292,10 +292,6 @@ describe("Phase 3H.3 — Client Battle/Combat State Model (CSM-001..CSM-020)", (
     const event = normalizeCombatEvent({
       type: "encounter_started",
       mobId: "mob-1",
-      mobHp: 100,
-      mobMaxHp: 100,
-      playerHp: 80,
-      playerMaxHp: 100,
       combatId: "combat-123",
       currentActorId: "player-1",
     });
@@ -304,8 +300,6 @@ describe("Phase 3H.3 — Client Battle/Combat State Model (CSM-001..CSM-020)", (
     expect(event?.type).toBe("encounter_started");
     if (event?.type === "encounter_started") {
       expect(event.mobId).toBe("mob-1");
-      expect(event.mobHp).toBe(100);
-      expect(event.mobMaxHp).toBe(100);
       expect(event.combatId).toBe("combat-123");
       expect(event.currentActorId).toBe("player-1");
     }
