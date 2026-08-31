@@ -11,9 +11,6 @@ import { BattleManager } from "./BattleManager.js";
 import { CombatManager } from "./CombatManager.js";
 import { BattleCombatBridge, type HpProvider } from "./BattleCombatBridge.js";
 import {
-  isBattleCombatEnabled,
-  isMobOwnedByCombat,
-  isPlayerOwnedByCombat,
   tickCombatEnemyTurns,
   releaseMobCombatState,
   notifyCombatJoinedPlayers,
@@ -93,12 +90,6 @@ export class GameLoop {
     this.evaluateDynamicBattleMembership();
     this.evaluateBattleDisengagement();
     this.tickMobAI(dt, now);
-    // Phase 3H.1: Skip Legacy encounter tick when New Combat is active.
-    // When flag ON, all encounter processing flows through tickCombatSessions.
-    // When flag OFF, Legacy encounters run normally for emergency rollback.
-    if (!isBattleCombatEnabled()) {
-      this.tickEncounters(now);
-    }
     this.tickCombatSessions(now);
     this.syncMobEntities();
   };
@@ -223,9 +214,9 @@ export class GameLoop {
       };
       this.bridge.syncParticipants(battleId, hpProvider);
 
-      // Phase 3G-3 (flag-gated): notify newly auto-joined player participants
-      // with the encounter_started compat payload so the old client panel opens.
-      if (isBattleCombatEnabled() && this.productionCombatDeps) {
+      // Phase 3G-3: notify newly auto-joined player participants with the
+      // encounter_started compat payload so the old client panel opens.
+      if (this.productionCombatDeps) {
         const refreshed = this.combatManager.getCombatSession(combatId);
         if (refreshed && refreshed.state === "ACTIVE") {
           notifyCombatJoinedPlayers(this.productionCombatDeps, refreshed);
@@ -241,17 +232,15 @@ export class GameLoop {
   private evaluateBattleDisengagement(): void {
     this.battleManager.evaluateBattleDisengagement();
 
-    // Phase 3G-3 (flag-gated): propagate battle-side FLEEING / rejoin to the
-    // combat session so a fleeing participant leaves turnOrder (alive stays
-    // true) and a rejoining participant regains eligibility at the next round
-    // boundary. Idempotent — safe to call every tick.
-    if (isBattleCombatEnabled()) {
-      for (const [battleId] of this.battleManager.getBattles()) {
-        const session = this.combatManager.getCombatSessionByBattle(battleId);
-        if (!session || session.state !== "ACTIVE") continue;
-        this.bridge.syncFleeingState(battleId);
-        this.bridge.syncRejoinState(battleId);
-      }
+    // Phase 3G-3: propagate battle-side FLEEING / rejoin to the combat session
+    // so a fleeing participant leaves turnOrder (alive stays true) and a
+    // rejoining participant regains eligibility at the next round boundary.
+    // Idempotent — safe to call every tick.
+    for (const [battleId] of this.battleManager.getBattles()) {
+      const session = this.combatManager.getCombatSessionByBattle(battleId);
+      if (!session || session.state !== "ACTIVE") continue;
+      this.bridge.syncFleeingState(battleId);
+      this.bridge.syncRejoinState(battleId);
     }
 
     // Cleanup resolved battles — prevent memory leak
@@ -262,11 +251,11 @@ export class GameLoop {
         battle.playerSide.state === "ELIMINATED" || battle.enemySide.state === "ELIMINATED";
 
       if (isResolved || isEliminated) {
-        // Phase 3G-2 (flag-gated): release New-Combat ownership state on the
-        // battle's mobs before removal, and close the client panel on
-        // walk-away disengagement. Inert when the feature flag is OFF.
+        // Phase 3G-2: release New-Combat ownership state on the battle's mobs
+        // before removal, and close the client panel on walk-away
+        // disengagement. Inert when no production combat deps are wired.
         const combatSession = this.combatManager.getCombatSessionByBattle(battleId);
-        if (isBattleCombatEnabled() && this.productionCombatDeps) {
+        if (this.productionCombatDeps) {
           releaseMobCombatState(this.productionCombatDeps, battle);
           if (isResolved) {
             for (const p of battle.playerSide.participants) {
@@ -277,7 +266,7 @@ export class GameLoop {
               });
             }
           }
-          // Phase 3G-4A: emit cleanup logs (flag-gated → zero output when OFF)
+          // Phase 3G-4A: emit cleanup logs
           emitBattleCleanup(this.productionCombatDeps, battleId, combatSession?.id);
         }
         // Remove associated combat session if any
@@ -342,172 +331,12 @@ export class GameLoop {
       players.set(sessionId, { x: player.x, y: player.y, health: player.health });
     }
 
-    const events = this.mobSpawner.tick(dt, players, now);
-
-    // NOTE: MobSpawner no longer emits combat events directly.
-    // Mob-initiated combat now flows through pendingEncounterTarget → beginEncounter.
-
-    // Phase 3I-2: When flag ON, ALL Legacy encounter creation is disabled.
-    // Mob-initiated combat flows through ProductionCombatRouter → CombatSession.
-    // When flag OFF, Legacy encounters run normally for emergency rollback.
-    if (!isBattleCombatEnabled()) {
-      // Begin encounters for mobs that have a pending target
-      for (const [, mob] of this.mobSpawner.getAllMobs()) {
-        if (!mob.pendingEncounterTarget || mob.inEncounter) continue;
-
-        // Phase 3G-4A: unconditional ownership guard — a mob owned by a
-        // CombatSession must never begin a Legacy encounter regardless of the
-        // flag. Inert in a fresh flag-OFF process (no sessions → false).
-        if (
-          isMobOwnedByCombat({ battleManager: this.battleManager, combatManager: this.combatManager }, mob.id) ||
-          isPlayerOwnedByCombat({ battleManager: this.battleManager, combatManager: this.combatManager }, mob.pendingEncounterTarget)
-        ) {
-          mob.pendingEncounterTarget = null;
-          continue;
-        }
-
-        const targetSessionId = mob.pendingEncounterTarget;
-        const player = this.room.state.players.get(targetSessionId);
-        if (!player || player.health <= 0) {
-          mob.pendingEncounterTarget = null;
-          continue;
-        }
-
-        // Must be within encounter engage range
-        const dist = Math.hypot(player.x - mob.x, player.y - mob.y);
-        if (dist > 1.6) continue;
-
-        const pStats = this.combatSystem.getPlayerStats(targetSessionId);
-        const result = this.encounterSystem.beginEncounter(
-          targetSessionId,
-          mob.id,
-          "mob",
-          { mobHp: mob.currentHp, mobMaxHp: mob.maxHp, playerHp: player.health, playerMaxHp: player.maxHealth },
-          now,
-        );
-
-        if (result.encounter) {
-          mob.pendingEncounterTarget = null;
-          mob.inEncounter = true;
-          mob.aiState = "fighting";
-          mob.aggroTarget = null;
-
-          const client = this.room.clients.getById(targetSessionId);
-          if (client) {
-            client.send("combat_event", {
-              type: "encounter_started",
-              mobId: mob.id,
-              mobHp: mob.currentHp,
-              mobMaxHp: mob.maxHp,
-              playerHp: player.health,
-              playerMaxHp: player.maxHealth,
-              attack: pStats.attack,
-              defense: pStats.defense,
-              level: player.level,
-            });
-          }
-        }
-      }
-    } else {
-      // Phase 3I-2: Flag ON — drain pendingEncounterTarget to prevent
-      // unbounded accumulation while mob AI still writes to it.
-      for (const [, mob] of this.mobSpawner.getAllMobs()) {
-        if (mob.pendingEncounterTarget) {
-          mob.pendingEncounterTarget = null;
-        }
-      }
-    }
-  }
-
-  /**
-   * Tick turn-based encounters: resolve due mob turns and player-turn timeouts.
-   */
-  private tickEncounters(now: number): void {
-    // Resolve mob turns that are due
-    for (const enc of this.encounterSystem.getActiveEncounters()) {
-      if (enc.ended || enc.turn !== "mob" || !enc.mobTurnScheduledAt) continue;
-      if (now < enc.mobTurnScheduledAt) continue;
-
-      const mob = this.mobSpawner.getMob(enc.mobId);
-      if (!mob) {
-        // Mob removed from the world while the encounter was active — release
-        // the player (defense-in-depth; the MobSpawner removal hook normally
-        // handles this first). endEncounterForMob returns undefined when the
-        // hook already released it, avoiding duplicate notifications.
-        const releasedPlayer = this.encounterSystem.endEncounterForMob(enc.mobId);
-        if (releasedPlayer) {
-          const client = this.room.clients.getById(releasedPlayer);
-          client?.send("combat_event", {
-            type: "encounter_fled",
-            sourceId: enc.mobId,
-            targetId: releasedPlayer,
-          });
-        }
-        continue;
-      }
-
-      const player = this.room.state.players.get(enc.playerId);
-      if (!player) continue;
-
-      const pStats = this.combatSystem.getPlayerStats(enc.playerId);
-      const result = this.encounterSystem.resolveMobTurn(
-        enc,
-        { mobAttack: mob.config.baseAttack, mobLevel: mob.config.level, playerDefense: pStats.defense },
-        Math.random,
-        now,
-      );
-
-      if (result.error) continue;
-
-      // Apply encounter events to state
-      for (const evt of result.events) {
-        if (evt.type === "player_damaged" && typeof evt.damage === "number") {
-          player.health = Math.max(0, player.health - evt.damage);
-          const client = this.room.clients.getById(enc.playerId);
-          client?.send("combat_event", {
-            ...evt,
-            currentHp: player.health,
-            maxHp: player.maxHealth,
-          });
-        }
-      }
-
-      // Handle encounter end
-      if (result.ended) {
-        mob.inEncounter = false;
-        mob.aiState = "idle";
-        mob.aggroTarget = null;
-        mob.patrolTarget = null;
-
-        const client = this.room.clients.getById(enc.playerId);
-        if (result.reason === "player_died") {
-          player.health = 0;
-          this.battleManager.removeParticipantByDeath(enc.playerId);
-          client?.send("combat_event", {
-            type: "player_died",
-            sourceId: mob.id,
-            targetId: enc.playerId,
-          });
-          // Respawn handled by GameRoom (single authority)
-        }
-      }
-    }
-
-    // Player-turn timeouts
-    const timedOut = this.encounterSystem.tickTimeouts(now);
-    for (const { playerId, encounter: enc } of timedOut) {
-      const client = this.room.clients.getById(playerId);
-      client?.send("combat_event", {
-        type: "encounter_timeout",
-        sourceId: enc.mobId,
-        targetId: playerId,
-      });
-    }
+    this.mobSpawner.tick(dt, players, now);
   }
 
   /**
    * Tick combat sessions: evaluate turn timeouts for all active CombatManager
-   * sessions, and (Phase 3G-2, flag-gated) auto-resolve enemy-side turns.
+   * sessions, and (Phase 3G-2) auto-resolve enemy-side turns.
    * Runs after encounter ticks and before entity sync. No second tick loop.
    */
   private tickCombatSessions(now: number): void {
@@ -515,7 +344,7 @@ export class GameLoop {
     for (const session of sessions) {
       this.combatManager.evaluateTurnTimeout(session.id, now);
     }
-    if (isBattleCombatEnabled() && this.productionCombatDeps) {
+    if (this.productionCombatDeps) {
       tickCombatEnemyTurns(this.productionCombatDeps, now);
     }
   }

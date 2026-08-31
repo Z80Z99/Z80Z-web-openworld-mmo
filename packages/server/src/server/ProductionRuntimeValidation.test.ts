@@ -1,11 +1,10 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { WorldHealthWriter, CombatPoint } from "@mmo/shared";
 import { BattleManager } from "./BattleManager.js";
 import { CombatManager } from "./CombatManager.js";
 import { BattleCombatBridge } from "./BattleCombatBridge.js";
 import { CombatSystem, type MobInstance, type MobTypeConfig } from "./CombatSystem.js";
 import {
-  isBattleCombatEnabled,
   routeRealtimeAttack,
   isMobOwnedByCombat,
   type ProductionCombatDeps,
@@ -197,10 +196,6 @@ function createAndBegin(w: World, battleId = "battle-1", mobHp = 200, mobBaseHp 
 }
 
 describe("Phase 3G-4B — Production Runtime Validation", () => {
-  afterEach(() => {
-    delete process.env.ENABLE_BATTLE_COMBAT;
-  });
-
   describe("PRV-001..006: Normal Battle Creation", () => {
     it("PRV-001: createBattle returns battle and it exists in getBattles", () => {
       const w = makeWorld();
@@ -948,14 +943,13 @@ describe("Phase 3G-4B — Production Runtime Validation", () => {
       expect(isMobOwnedByCombat(w.deps, "mob_1")).toBe(true);
     });
 
-    it("PRV-061: flag flip does not remove session ownership", () => {
+    it("PRV-061: session ownership held after creation", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 10);
       const mob = makeMob("mob_1", 200, { baseHp: 200 });
       w.mobs.set(mob.id, mob);
       w.entities.set(mob.id, { health: 200, maxHealth: 200 });
       routeRealtimeAttack(w.deps, "p1", mob);
-      process.env.ENABLE_BATTLE_COMBAT = "false";
       expect(isMobOwnedByCombat(w.deps, "mob_1")).toBe(true);
     });
 
@@ -974,8 +968,7 @@ describe("Phase 3G-4B — Production Runtime Validation", () => {
   });
 
   describe("PRV-063..068: No Unexpected Legacy Fallback", () => {
-    it("PRV-063: flag ON routes to combat, not fallback", () => {
-      delete process.env.ENABLE_BATTLE_COMBAT;
+    it("PRV-063: realtime attack routes to combat, not fallback", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 200, { baseHp: 200 });
@@ -1014,20 +1007,7 @@ describe("Phase 3G-4B — Production Runtime Validation", () => {
       (w.bridge as any).beginEncounter = orig;
     });
 
-    it("PRV-066: flag OFF leaves zero combat state", () => {
-      process.env.ENABLE_BATTLE_COMBAT = "false";
-      const w = makeWorld();
-      addPlayer(w, "p1", 100);
-      const mob = makeMob("mob_1", 30);
-      w.mobs.set(mob.id, mob);
-      expect(isBattleCombatEnabled()).toBe(false);
-      expect(w.bm.getBattles().size).toBe(0);
-      expect(w.cm.getAllCombatMappings().length).toBe(0);
-    });
-
     it("PRV-067: default flag routes to combat path", () => {
-      delete process.env.ENABLE_BATTLE_COMBAT;
-      expect(isBattleCombatEnabled()).toBe(true);
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 200, { baseHp: 200 });
@@ -1038,14 +1018,13 @@ describe("Phase 3G-4B — Production Runtime Validation", () => {
       expect(w.bm.getBattles().size).toBe(1);
     });
 
-    it("PRV-068: flag flip mid-combat preserves session", () => {
+    it("PRV-068: session preserved after creation", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 200, { baseHp: 200 });
       w.mobs.set(mob.id, mob);
       w.entities.set(mob.id, { health: 200, maxHealth: 200 });
       routeRealtimeAttack(w.deps, "p1", mob);
-      process.env.ENABLE_BATTLE_COMBAT = "false";
       expect(w.bm.getBattles().size).toBe(1);
       const battle = [...w.bm.getBattles().values()][0]!;
       expect(w.cm.getCombatSessionByBattle(battle.id)).toBeDefined();
@@ -1054,7 +1033,6 @@ describe("Phase 3G-4B — Production Runtime Validation", () => {
 
   describe("PRV-069..070: Full Production Sequence", () => {
     it("PRV-069: complete 1v1 lifecycle — create, combat, kill, cleanup, empty", () => {
-      delete process.env.ENABLE_BATTLE_COMBAT;
       const w = makeWorld();
       addPlayer(w, "p1", 100, 100);
       const mob = makeMob("mob_1", 5, { baseHp: 30 });
@@ -1074,7 +1052,6 @@ describe("Phase 3G-4B — Production Runtime Validation", () => {
     });
 
     it("PRV-070: complete multi-player lifecycle — 2 players vs 1 mob", () => {
-      delete process.env.ENABLE_BATTLE_COMBAT;
       const w = makeWorld();
       addPlayer(w, "p1", 100, 10);
       addPlayer(w, "p2", 100, 10);

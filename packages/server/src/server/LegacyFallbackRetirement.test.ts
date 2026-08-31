@@ -16,7 +16,6 @@ import { CombatManager } from "./CombatManager.js";
 import { BattleCombatBridge } from "./BattleCombatBridge.js";
 import { CombatSystem, type MobInstance, type MobTypeConfig } from "./CombatSystem.js";
 import {
-  isBattleCombatEnabled,
   routeRealtimeAttack,
   routeEncounterAction,
   routeEncounterDefend,
@@ -328,28 +327,14 @@ describe("Phase 3G-4C — Legacy Fallback Retirement", () => {
 
   /* ── Emergency rollback ── */
 
-  describe("LFR-011..013: Emergency rollback via ENABLE_BATTLE_COMBAT=false", () => {
-    it("LFR-011: ENABLE_BATTLE_COMBAT=false → isBattleCombatEnabled() returns false", () => {
-      process.env.ENABLE_BATTLE_COMBAT = "false";
-      expect(isBattleCombatEnabled()).toBe(false);
-    });
-
-    it("LFR-012: ENABLE_BATTLE_COMBAT=false → routeRealtimeAttack fallback is allowed (not blocked)", () => {
-      process.env.ENABLE_BATTLE_COMBAT = "false";
+  describe("LFR-012: Fallback on missing player", () => {
+    it("LFR-012: missing player → routeRealtimeAttack fallback is allowed (not blocked)", () => {
       const w = makeWorld();
       const mob = makeMob("mob_1", 30);
       w.mobs.set(mob.id, mob);
 
       const r = routeRealtimeAttack(w.deps, "ghost", mob);
       expect(r.kind).toBe("fallback");
-      // When flag is OFF, fallback is allowed — GameRoom won't block it
-      // No creation_failed should be logged at router level since ensurePlayerCombat
-      // is only called when no session exists for the mob (regardless of flag)
-    });
-
-    it("LFR-013: flag unset → isBattleCombatEnabled() returns true (default ON)", () => {
-      delete process.env.ENABLE_BATTLE_COMBAT;
-      expect(isBattleCombatEnabled()).toBe(true);
     });
   });
 

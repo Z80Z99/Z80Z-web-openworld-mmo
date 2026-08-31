@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import type {
   BattleGroup,
   CombatPoint,
@@ -10,7 +10,6 @@ import { BattleCombatBridge } from "./BattleCombatBridge.js";
 import { CombatSystem, type MobInstance, type MobTypeConfig } from "./CombatSystem.js";
 import { BATTLE_MOB_TURN_DELAY_MS } from "@mmo/shared";
 import {
-  isBattleCombatEnabled,
   isMobOwnedByCombat,
   getCombatSessionForMob,
   getBattleForMob,
@@ -159,28 +158,7 @@ function addPlayer(w: World, id: string, health = 100, attack = 10): void {
 }
 
 describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
-  afterEach(() => {
-    delete process.env.ENABLE_BATTLE_COMBAT;
-  });
-
-  describe("Feature flag", () => {
-    it("PBA-001: flag unset → New (default ON)", () => {
-      delete process.env.ENABLE_BATTLE_COMBAT;
-      expect(isBattleCombatEnabled()).toBe(true);
-    });
-
-    it("PBA-001: flag \"false\" → Legacy emergency rollback", () => {
-      process.env.ENABLE_BATTLE_COMBAT = "false";
-      expect(isBattleCombatEnabled()).toBe(false);
-    });
-
-    it("PBA-001: flag \"true\" → New (explicit ON)", () => {
-      process.env.ENABLE_BATTLE_COMBAT = "true";
-      expect(isBattleCombatEnabled()).toBe(true);
-    });
-  });
-
-  describe("PBA-002: flag ON → New path creates battle + combat", () => {
+  describe("PBA-002: New path creates battle + combat", () => {
     it("realtime attack routes through the New Combat stack", () => {
       const w = makeWorld();
       addPlayer(w, "player-1", 100, 100); // high attack → kills in one hit
@@ -308,7 +286,7 @@ describe("Phase 3G-2 — Production 1v1 Battle Activation", () => {
       addPlayer(w, "player-1", 100, 10);
       const mob = makeMob("mob-1", 30);
       w.mobs.set(mob.id, mob);
-      // Legacy realtime path (flag OFF) — single processPlayerAttack call
+      // Direct CombatSystem call — single processPlayerAttack
       const events = w.combatSystem.processPlayerAttack("player-1", mob, Date.now(), 1);
       expect(events).not.toBeNull();
       expect(mob.currentHp).toBe(20); // exactly one damage application

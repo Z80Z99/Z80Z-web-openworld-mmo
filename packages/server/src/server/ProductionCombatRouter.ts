@@ -88,17 +88,6 @@ export interface ProductionCombatDeps {
   logCombatEvent?: (event: string, data: Record<string, unknown>) => void;
 }
 
-/* ── Feature flag ── */
-
-/**
- * Default ON → New Battle/Combat is the production path.
- * Exact string "false" → Legacy emergency rollback (flag flip at runtime).
- * Unset or any other value → New (default ON).
- */
-export function isBattleCombatEnabled(): boolean {
-  return process.env.ENABLE_BATTLE_COMBAT !== "false";
-}
-
 /* ── Ownership predicates (single-ownership core) ── */
 
 /**

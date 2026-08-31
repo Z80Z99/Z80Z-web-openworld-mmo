@@ -26,8 +26,8 @@ import { Auth } from "./Auth.js";
 import { AOIManager } from "./AOI.js";
 import { GameLoop, createGameLoop } from "./GameLoop.js";
 import { CombatSystem, type MobInstance } from "./CombatSystem.js";
-import { EncounterSystem, ENCOUNTER_ENGAGE_RANGE } from "./EncounterSystem.js";
-import { applyCombatEvents, applyLevelUps, resolveMobKill, sendEncounterEvent } from "./CombatEffects.js";
+import { EncounterSystem } from "./EncounterSystem.js";
+import { resolveMobKill, sendEncounterEvent } from "./CombatEffects.js";
 import { MobSpawner } from "./MobSpawner.js";
 import { QuestSystem } from "./QuestSystem.js";
 import { MovementSystem } from "./MovementSystem.js";
@@ -44,15 +44,12 @@ import { CombatManager } from "./CombatManager.js";
 import { BattleCombatBridge } from "./BattleCombatBridge.js";
 import { RoomWorldHealthWriter } from "./RoomWorldHealthWriter.js";
 import {
-  isBattleCombatEnabled,
-  isMobOwnedByCombat,
   routeRealtimeAttack,
   routeEncounterAction,
   routeEncounterDefend,
   routeEncounterFlee,
   type ProductionCombatDeps,
 } from "./ProductionCombatRouter.js";
-import { emitCombatLog } from "./ProductionCombatLog.js";
 
 export const GAME_ROOM_CAPACITY = 100;
 
@@ -133,24 +130,11 @@ export class GameRoom extends Room<RoomState> {
     // Mount system
     this.mountSystem = new MountSystem(this.db);
 
-    // Mob spawner — when AOI pruning removes a mob, release any encounter
-    // referencing it so the player's busy/combat state can never dangle.
+    // Mob spawner — when AOI pruning removes a mob, drop it from any active
+    // battle so the player's combat state can never dangle.
     this.mobSpawner = new MobSpawner(this.worldGen, (mobId) => {
       // Remove mob from any active battle
       this.battleManager.removeParticipantByDeath(mobId);
-      // Phase 3I-2: Only touch Legacy encounter when flag OFF (rollback mode).
-      // When flag ON, no Legacy encounters exist — skip to keep production clean.
-      if (!isBattleCombatEnabled()) {
-        const releasedPlayer = this.encounterSystem.endEncounterForMob(mobId);
-        if (releasedPlayer) {
-          const client = this.clients.getById(releasedPlayer);
-          client?.send("combat_event", {
-            type: "encounter_fled",
-            sourceId: mobId,
-            targetId: releasedPlayer,
-          });
-        }
-      }
     });
 
     // Tile physics system (event-driven, processes when tiles change)
@@ -402,22 +386,6 @@ export class GameRoom extends Room<RoomState> {
 
     // Remove from any active battle
     this.battleManager.removeParticipantByDeath(client.sessionId);
-
-    // End any active encounter and release the mob
-    // Phase 3I-2: Only touch Legacy encounter when flag OFF (rollback mode).
-    // When flag ON, no Legacy encounters exist — skip to keep production clean.
-    if (!isBattleCombatEnabled() && this.encounterSystem.hasEncounter(client.sessionId)) {
-      const enc = this.encounterSystem.getEncounter(client.sessionId);
-      if (enc) {
-        this.encounterSystem.endEncounter(enc, "player_died");
-        const mob = this.mobSpawner.getMob(enc.mobId);
-        if (mob) {
-          mob.inEncounter = false;
-          mob.aiState = "idle";
-          mob.aggroTarget = null;
-        }
-      }
-    }
 
     // Remove mount tracking
     this.mountSystem.removePlayerMount(client.sessionId);
@@ -776,109 +744,19 @@ export class GameRoom extends Room<RoomState> {
       const dist = Math.hypot(player.x - mob.x, player.y - mob.y);
       if (dist > PLAYER_ATTACK_RANGE) return;
 
-      // Already in an encounter — ignore the real-time attack message.
-      // Phase 3I-2: Guard with flag — when ON, no Legacy encounters exist.
-      if (!isBattleCombatEnabled() && this.encounterSystem.hasEncounter(client.sessionId)) return;
-
       // Phase 3G-2/3G-3: New Combat single ownership — exactly one owner per
-      // attack. blocked → combat owns it (no legacy realtime attack); joined →
-      // attacker entered the combat as pending (no action this round);
-      // combat → New path handled it (never legacy);
-      // fallback → creation failed before side effects → legacy below.
-      if (isBattleCombatEnabled()) {
-        const routed = routeRealtimeAttack(this.combatDeps, client.sessionId, mob);
-        if (routed.kind === "blocked" || routed.kind === "joined") return;
-        if (routed.kind === "combat") {
-          if (routed.damage) {
-            this.sendNewCombatDamageDealt(client.sessionId, routed.damage, mob);
-          }
-          return;
+      // attack. blocked → combat owns it; joined → attacker entered the combat
+      // as pending (no action this round); combat → New path handled it;
+      // fallback → creation failed before side effects — exit the handler.
+      const routed = routeRealtimeAttack(this.combatDeps, client.sessionId, mob);
+      if (routed.kind === "blocked" || routed.kind === "joined") return;
+      if (routed.kind === "combat") {
+        if (routed.damage) {
+          this.sendNewCombatDamageDealt(client.sessionId, routed.damage, mob);
         }
-        // Phase 3G-4C: creation failed — block Legacy fallback, log structured error.
-        emitCombatLog(this.combatDeps, "fallback_blocked_attack", {
-          playerId: client.sessionId,
-          targetId: mob.id,
-        });
         return;
       }
-
-      // Phase 3G-4A: unconditional ownership backstop — a mob owned by a
-      // CombatSession must never enter the Legacy path regardless of the flag.
-      // Inert in a fresh flag-OFF process (no sessions → false).
-      if (isMobOwnedByCombat(this.combatDeps, mob.id)) return;
-
-      const events = this.combatSystem.processPlayerAttack(
-        client.sessionId,
-        mob,
-        Date.now(),
-        player.level,
-      );
-
-      if (!events) return;
-
-      // Aggro-on-hit: the attacked mob turns on its attacker (unless the
-      // strike killed it — processPlayerAttack then clears aggro itself).
-      if (mob.currentHp > 0) {
-        mob.aggroTarget = client.sessionId;
-        mob.aiState = "chase";
-        mob.lastCombatTime = Date.now();
-      }
-
-      // Apply combat events to state + clients + inventory
-      applyCombatEvents(
-        this,
-        events,
-        mob,
-        client.sessionId,
-        (playerId) => this.getPlayerInventory(playerId),
-        (playerId, inv) => this.savePlayerInventory(playerId, inv),
-        (sid) => {
-          const c = this.clients.getById(sid);
-          return c ? (c as any).authData as ClientAuthData | undefined : undefined;
-        },
-      );
-
-      // Sync XP to schema and apply any level-ups from this kill.
-      const stats = this.combatSystem.getPlayerStats(client.sessionId);
-      if (stats) {
-        applyLevelUps({
-          room: this,
-          player,
-          playerStats: stats,
-          sessionId: client.sessionId,
-        });
-      }
-
-      // Begin turn-based encounter if mob survived and is within engage range.
-      if (mob.currentHp > 0) {
-        const engageDist = Math.hypot(player.x - mob.x, player.y - mob.y);
-        if (engageDist <= ENCOUNTER_ENGAGE_RANGE) {
-          const pStats = this.combatSystem.getPlayerStats(client.sessionId);
-          const result = this.encounterSystem.beginEncounter(
-            client.sessionId,
-            mob.id,
-            "player",
-            { mobHp: mob.currentHp, mobMaxHp: mob.maxHp, playerHp: player.health, playerMaxHp: player.maxHealth },
-            Date.now(),
-          );
-          if (result.encounter) {
-            mob.aiState = "fighting";
-            mob.inEncounter = true;
-            mob.aggroTarget = null;
-            sendEncounterEvent(this, client.sessionId, {
-              type: "encounter_started",
-              mobId: mob.id,
-              mobHp: mob.currentHp,
-              mobMaxHp: mob.maxHp,
-              playerHp: player.health,
-              playerMaxHp: player.maxHealth,
-              attack: pStats.attack,
-              defense: pStats.defense,
-              level: player.level,
-            });
-          }
-        }
-      }
+      return;
     });
 
     // Turn-based encounter action (attack / defend / flee)
@@ -892,134 +770,43 @@ export class GameRoom extends Room<RoomState> {
         if (!player || player.health <= 0) return;
 
         // Phase 3G-2/3G-3: New Combat single ownership — route turn-based
-        // attacks, defends, and flees through the combat system when the player owns
-        // an ACTIVE session. combat → new path handled it (never legacy).
-        // not-in-combat → legacy.
-        if (
-          isBattleCombatEnabled() &&
-          (message.action === "attack" || message.action === "defend" || message.action === "flee")
-        ) {
-          if (message.action === "attack") {
-            const routed = routeEncounterAction(this.combatDeps, client.sessionId, message.targetId);
-            if (routed.kind === "combat") {
-              if (routed.damage) {
-                const targetMob = this.mobSpawner.getMob(routed.damage.targetId);
-                this.sendNewCombatDamageDealt(client.sessionId, routed.damage, targetMob ?? undefined);
-              }
-              return; // new path complete — do not run legacy path
+        // attacks, defends, and flees through the combat system when the player
+        // owns an ACTIVE session. combat → new path handled it.
+        if (message.action === "attack") {
+          const routed = routeEncounterAction(this.combatDeps, client.sessionId, message.targetId);
+          if (routed.kind === "combat") {
+            if (routed.damage) {
+              const targetMob = this.mobSpawner.getMob(routed.damage.targetId);
+              this.sendNewCombatDamageDealt(client.sessionId, routed.damage, targetMob ?? undefined);
             }
-          } else if (message.action === "defend") {
-            const defended = routeEncounterDefend(
-              {
-                battleManager: this.battleManager,
-                combatManager: this.combatManager,
-              },
-              client.sessionId,
-            );
-            if (defended.kind === "combat") {
-              return; // new path complete — do not run legacy path
-            }
-          } else if (message.action === "flee") {
-            const fled = routeEncounterFlee(
-              {
-                battleManager: this.battleManager,
-                combatManager: this.combatManager,
-                bridge: this.battleCombatBridge,
-                sendCombatEvent: this.combatDeps.sendCombatEvent,
-              },
-              client.sessionId,
-            );
-            if (fled.kind === "combat") {
-              return; // new path complete — do not run legacy path
-            }
+            return; // new path complete
           }
-          // Phase 3G-4C: not-in-combat or no active session — block Legacy fallback,
-          // log structured error. Emergency rollback via ENABLE_BATTLE_COMBAT=false.
-          emitCombatLog(this.combatDeps, "fallback_blocked_encounter", {
-            playerId: client.sessionId,
-            action: message.action,
-          });
-          return;
-        }
-
-        const encounter = this.encounterSystem.getEncounter(client.sessionId);
-        if (!encounter) return;
-
-        const mob = this.mobSpawner.getMob(encounter.mobId);
-        if (!mob || mob.aiState === "dead") return;
-
-        const pStats = this.combatSystem.getPlayerStats(client.sessionId);
-
-        // Legacy fallback: original encounterSystem.playerAction() path
-        const result = this.encounterSystem.playerAction(
-          encounter,
-          message.action,
-          {
-            attack: pStats.attack,
-            level: player.level,
-            mobDefense: mob.config.baseDefense,
-            playerDefense: pStats.defense,
-            mobMaxHp: mob.maxHp,
-          },
-          Math.random,
-          Date.now(),
-        );
-
-        if (result.error) return;
-
-        // Apply encounter events
-        for (const evt of result.events) {
-          // The terminal mob_killed from the state machine is NOT forwarded —
-          // resolveMobKill emits the single authoritative kill event below,
-          // otherwise the client would receive (and quest-report) it twice.
-          if (evt.type === "mob_killed") continue;
-
-          if (evt.type === "damage_dealt" && typeof evt.damage === "number") {
-            const entity = this.state.entities.get(mob.id);
-            if (entity) entity.health = Math.max(0, mob.currentHp - evt.damage);
-            mob.currentHp = Math.max(0, mob.currentHp - evt.damage);
+        } else if (message.action === "defend") {
+          const defended = routeEncounterDefend(
+            {
+              battleManager: this.battleManager,
+              combatManager: this.combatManager,
+            },
+            client.sessionId,
+          );
+          if (defended.kind === "combat") {
+            return; // new path complete
           }
-
-          if (evt.type === "player_damaged" && typeof evt.damage === "number") {
-            player.health = Math.max(0, player.health - evt.damage);
-          }
-
-          sendEncounterEvent(this, client.sessionId, {
-            ...evt,
-            currentHp: evt.type === "player_damaged" ? player.health : mob.currentHp,
-            maxHp: evt.type === "player_damaged" ? player.maxHealth : mob.maxHp,
-          });
-        }
-
-        // Handle encounter end
-        if (result.ended) {
-          mob.inEncounter = false;
-          mob.aiState = "idle";
-          mob.aggroTarget = null;
-          mob.patrolTarget = null;
-
-          if (result.reason === "victory") {
-            resolveMobKill({
-              room: this,
-              player,
-              playerStats: pStats,
-              sessionId: client.sessionId,
-              mob,
-              getPlayerInventory: (playerId) => this.getPlayerInventory(playerId),
-              savePlayerInventory: (playerId, inv) => this.savePlayerInventory(playerId, inv),
-              getAuthData: (sid) => {
-                const c = this.clients.getById(sid);
-                return c ? (c as any).authData as ClientAuthData | undefined : undefined;
-              },
-            });
-          }
-
-          if (result.reason === "player_died") {
-            player.health = 0;
-            this.battleManager.removeParticipantByDeath(client.sessionId);
-            this.respawnPlayer(client.sessionId);
+        } else if (message.action === "flee") {
+          const fled = routeEncounterFlee(
+            {
+              battleManager: this.battleManager,
+              combatManager: this.combatManager,
+              bridge: this.battleCombatBridge,
+              sendCombatEvent: this.combatDeps.sendCombatEvent,
+            },
+            client.sessionId,
+          );
+          if (fled.kind === "combat") {
+            return; // new path complete
           }
         }
+        return;
       },
     );
 

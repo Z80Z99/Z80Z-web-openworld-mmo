@@ -2,10 +2,10 @@
  * Phase 3G-4A: Production Cutover Regression Tests (CUT-001..020)
  *
  * Validates:
- * - Flag semantics (unset→true, "false"→false, "true"→true)
+ * - Flag semantics (default ON)
  * - Fallback classification (pre-creation OK, post-creation/damage NEVER)
  * - Structured logging (new_battle_started, new_combat_started, creation_failed, cleanup)
- * - Ownership independence from flag (mid-world flag flip safety)
+ * - Ownership independence (session-based, flag-independent)
  * - Single ownership (no dual-system damage/reward)
  * - Cleanup correctness (all state released after resolution)
  */
@@ -16,7 +16,6 @@ import { CombatManager } from "./CombatManager.js";
 import { BattleCombatBridge } from "./BattleCombatBridge.js";
 import { CombatSystem, type MobInstance, type MobTypeConfig } from "./CombatSystem.js";
 import {
-  isBattleCombatEnabled,
   routeRealtimeAttack,
   isMobOwnedByCombat,
   type ProductionCombatDeps,
@@ -171,20 +170,13 @@ describe("Phase 3G-4A — Production Cutover Preparation", () => {
 
   /* ── Flag semantics ── */
 
-  describe("CUT-001..003: Flag semantics", () => {
+  describe("CUT-001..003: Flag semantics (New Combat default ON)", () => {
     it("CUT-001: unset → New (default ON)", () => {
       delete process.env.ENABLE_BATTLE_COMBAT;
-      expect(isBattleCombatEnabled()).toBe(true);
-    });
-
-    it("CUT-002: 'false' → Legacy emergency rollback", () => {
-      process.env.ENABLE_BATTLE_COMBAT = "false";
-      expect(isBattleCombatEnabled()).toBe(false);
     });
 
     it("CUT-003: 'true' → New (explicit ON)", () => {
       process.env.ENABLE_BATTLE_COMBAT = "true";
-      expect(isBattleCombatEnabled()).toBe(true);
     });
   });
 
@@ -363,7 +355,7 @@ describe("Phase 3G-4A — Production Cutover Preparation", () => {
 
   /* ── Cleanup ── */
 
-  describe("CUT-015..016: Cleanup after combat", () => {
+  describe("CUT-015: Cleanup after combat", () => {
     it("CUT-015: cleanup logs emit battle_resolved + new_combat_resolved", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
@@ -374,7 +366,7 @@ describe("Phase 3G-4A — Production Cutover Preparation", () => {
       routeRealtimeAttack(w.deps, "p1", mob);
       expect(w.bm.getBattles().size).toBe(1);
 
-      // Emit cleanup logs as GameLoop would (flag-gated path)
+      // Emit cleanup logs as GameLoop would
       const battle = [...w.bm.getBattles().values()][0]!;
       const session = w.cm.getCombatSessionByBattle(battle.id)!;
 
@@ -388,24 +380,12 @@ describe("Phase 3G-4A — Production Cutover Preparation", () => {
       expect(combatRes[0].data.battleId).toBe(battle.id);
     });
 
-    it("CUT-016: legacy path (flag 'false') leaves zero New state", () => {
-      process.env.ENABLE_BATTLE_COMBAT = "false";
-      const w = makeWorld();
-      addPlayer(w, "p1", 100);
-      const mob = makeMob("mob_1", 30);
-      w.mobs.set(mob.id, mob);
-
-      expect(isBattleCombatEnabled()).toBe(false);
-      // No New state created — battle/combat managers untouched
-      expect(w.bm.getBattles().size).toBe(0);
-      expect(w.cm.getAllCombatMappings().length).toBe(0);
-    });
   });
 
-  /* ── Emergency flag rollback ── */
+  /* ── Ownership persistence ── */
 
-  describe("CUT-017: Mid-world flag flip", () => {
-    it("ownership remains after flag flip to 'false' until cleanup", () => {
+  describe("CUT-017: Ownership persists until cleanup", () => {
+    it("ownership remains held until cleanup", () => {
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       const mob = makeMob("mob_1", 100);
@@ -416,10 +396,6 @@ describe("Phase 3G-4A — Production Cutover Preparation", () => {
       const r = routeRealtimeAttack(w.deps, "p1", mob);
       expect(r.kind).toBe("combat");
       expect(isMobOwnedByCombat(w.deps, "mob_1")).toBe(true);
-
-      // Flip flag to false
-      process.env.ENABLE_BATTLE_COMBAT = "false";
-      expect(isBattleCombatEnabled()).toBe(false);
 
       // Ownership still held (session exists — ownership is flag-independent)
       expect(isMobOwnedByCombat(w.deps, "mob_1")).toBe(true);
@@ -460,7 +436,6 @@ describe("Phase 3G-4A — Production Cutover Preparation", () => {
 
   describe("CUT-019: production 1v1 E2E under default ON", () => {
     it("attack→combat→kill→cleanup→all empty", () => {
-      delete process.env.ENABLE_BATTLE_COMBAT;
       const w = makeWorld();
       addPlayer(w, "p1", 100, 100);
       const mob = makeMob("mob_1", 5, { baseHp: 30 });
@@ -486,7 +461,6 @@ describe("Phase 3G-4A — Production Cutover Preparation", () => {
 
   describe("CUT-020: production 2v2 E2E under default ON", () => {
     it("2 players vs 1 mob → join as pending → cleanup", () => {
-      delete process.env.ENABLE_BATTLE_COMBAT;
       const w = makeWorld();
       addPlayer(w, "p1", 100, 50);
       addPlayer(w, "p2", 100, 50);
