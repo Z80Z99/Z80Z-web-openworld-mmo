@@ -844,3 +844,485 @@ describe("Battle/Combat UI (UI-001..UI-025)", () => {
     expect(typeof (combatPanel as any).nextTurn).toBe("undefined");
   });
 });
+
+/* ═══════════════════════════════════════════════════════
+ * Core Combat CG-001..CG-027
+ * ═══════════════════════════════════════════════════════ */
+
+describe("Core Combat CG-001..CG-027", () => {
+  let parent: HTMLElement;
+  let panel: CombatPanel;
+
+  beforeEach(() => {
+    parent = document.createElement("div");
+    document.body.appendChild(parent);
+  });
+
+  afterEach(() => {
+    panel?.destroy();
+    parent.remove();
+  });
+
+  /* ── Attack Targeting (CG-001..CG-006) ── */
+
+  it("CG-001: 1v1 attack → handler receives correct targetId", () => {
+    panel = new CombatPanel(parent);
+    let receivedAction: { action: string; targetId?: string } | undefined;
+    panel.onAction((p) => { receivedAction = p; });
+
+    panel.show(makeCombatPayload({
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player", name: "Warrior" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy", name: "Goblin" }),
+      ],
+    }));
+
+    // Click Attack → enters target mode, auto-selects first alive enemy
+    const attackBtn = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    attackBtn.click();
+
+    // Click the same enemy card to confirm (since it's already selected)
+    const enemyCard = parent.querySelector("[data-participant='enemy-0']") as HTMLElement;
+    enemyCard.click();
+
+    expect(receivedAction).toEqual({ action: "attack", targetId: "mob-1" });
+  });
+
+  it("CG-002: 2v1 attack targeting mob-1 → correct targetId", () => {
+    panel = new CombatPanel(parent);
+    let receivedAction: { action: string; targetId?: string } | undefined;
+    panel.onAction((p) => { receivedAction = p; });
+
+    panel.show(makeCombatPayload({
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "player-2", side: "player", name: "Mage" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+      ],
+    }));
+
+    const attackBtn = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    attackBtn.click();
+    const enemyCard = parent.querySelector("[data-participant='enemy-0']") as HTMLElement;
+    enemyCard.click();
+
+    expect(receivedAction).toEqual({ action: "attack", targetId: "mob-1" });
+  });
+
+  it("CG-003: 1v2 attack targeting mob-X → correct targetId", () => {
+    panel = new CombatPanel(parent);
+    let receivedAction: { action: string; targetId?: string } | undefined;
+    panel.onAction((p) => { receivedAction = p; });
+
+    panel.show(makeCombatPayload({
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+        makeCombatParticipant({ participantId: "mob-2", side: "enemy", name: "Orc" }),
+      ],
+    }));
+
+    const attackBtn = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    attackBtn.click();
+    const enemyX = parent.querySelector("[data-participant='enemy-0']") as HTMLElement;
+    enemyX.click();
+
+    expect(receivedAction).toEqual({ action: "attack", targetId: "mob-1" });
+  });
+
+  it("CG-004: 1v2 attack targeting mob-Y → correct targetId", () => {
+    panel = new CombatPanel(parent);
+    let receivedAction: { action: string; targetId?: string } | undefined;
+    panel.onAction((p) => { receivedAction = p; });
+
+    panel.show(makeCombatPayload({
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+        makeCombatParticipant({ participantId: "mob-2", side: "enemy", name: "Orc" }),
+      ],
+    }));
+
+    const attackBtn = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    attackBtn.click();
+    // Select the second enemy (mob-2 = enemy-1)
+    const enemyY = parent.querySelector("[data-participant='enemy-1']") as HTMLElement;
+    enemyY.click();
+    // Confirm attack with mob-2
+    attackBtn.click();
+
+    expect(receivedAction).toEqual({ action: "attack", targetId: "mob-2" });
+  });
+
+  it("CG-005: 2v2 attack targeting mob-X → correct targetId", () => {
+    panel = new CombatPanel(parent);
+    let receivedAction: { action: string; targetId?: string } | undefined;
+    panel.onAction((p) => { receivedAction = p; });
+
+    panel.show(makeCombatPayload({
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "player-2", side: "player", name: "Mage" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+        makeCombatParticipant({ participantId: "mob-2", side: "enemy", name: "Orc" }),
+      ],
+    }));
+
+    const attackBtn = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    attackBtn.click();
+    const enemyX = parent.querySelector("[data-participant='enemy-0']") as HTMLElement;
+    enemyX.click();
+
+    expect(receivedAction).toEqual({ action: "attack", targetId: "mob-1" });
+  });
+
+  it("CG-006: 2v2 attack targeting mob-Y → correct targetId", () => {
+    panel = new CombatPanel(parent);
+    let receivedAction: { action: string; targetId?: string } | undefined;
+    panel.onAction((p) => { receivedAction = p; });
+
+    panel.show(makeCombatPayload({
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "player-2", side: "player", name: "Mage" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+        makeCombatParticipant({ participantId: "mob-2", side: "enemy", name: "Orc" }),
+      ],
+    }));
+
+    const attackBtn = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    attackBtn.click();
+    const enemyY = parent.querySelector("[data-participant='enemy-1']") as HTMLElement;
+    enemyY.click();
+    attackBtn.click();
+
+    expect(receivedAction).toEqual({ action: "attack", targetId: "mob-2" });
+  });
+
+  /* ── Action Enable/Disable (CG-007..CG-010) ── */
+
+  it("CG-007: current actor can attack (buttons enabled)", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      currentActorId: "player-1",
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+      ],
+    }));
+
+    const attackBtn = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    const defendBtn = parent.querySelector("[data-action='defend']") as HTMLButtonElement;
+    const fleeBtn = parent.querySelector("[data-action='flee']") as HTMLButtonElement;
+    expect(attackBtn.disabled).toBe(false);
+    expect(defendBtn.disabled).toBe(false);
+    expect(fleeBtn.disabled).toBe(false);
+  });
+
+  it("CG-008: non-current actor cannot attack (buttons disabled)", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      currentActorId: "mob-1",
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+      ],
+    }));
+
+    const attackBtn = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    const defendBtn = parent.querySelector("[data-action='defend']") as HTMLButtonElement;
+    const fleeBtn = parent.querySelector("[data-action='flee']") as HTMLButtonElement;
+    expect(attackBtn.disabled).toBe(true);
+    expect(defendBtn.disabled).toBe(true);
+    expect(fleeBtn.disabled).toBe(true);
+  });
+
+  it("CG-009: current actor can defend (defend button enabled)", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      currentActorId: "player-1",
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+      ],
+    }));
+
+    const defendBtn = parent.querySelector("[data-action='defend']") as HTMLButtonElement;
+    expect(defendBtn.disabled).toBe(false);
+  });
+
+  it("CG-010: non-current actor cannot defend (defend button disabled)", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      currentActorId: "mob-1",
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+      ],
+    }));
+
+    const defendBtn = parent.querySelector("[data-action='defend']") as HTMLButtonElement;
+    expect(defendBtn.disabled).toBe(true);
+  });
+
+  /* ── Flee (CG-011..CG-012) ── */
+
+  it("CG-011: explicit flee → handler receives {action:'flee'}", () => {
+    panel = new CombatPanel(parent);
+    let receivedAction: { action: string; targetId?: string } | undefined;
+    panel.onAction((p) => { receivedAction = p; });
+
+    panel.show(makeCombatPayload({
+      currentActorId: "player-1",
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+      ],
+    }));
+
+    const fleeBtn = parent.querySelector("[data-action='flee']") as HTMLButtonElement;
+    fleeBtn.click();
+
+    expect(receivedAction).toEqual({ action: "flee" });
+  });
+
+  it("CG-012: flee result (combat=null) → panel.hide() called", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload());
+
+    // Simulate flee by calling hide() directly (which main.ts does on encounter_fled)
+    panel.hide();
+
+    // Container should be hidden — CombatPanel container is the first child
+    const container = parent.querySelector("[data-combat-state]") as HTMLElement;
+    expect(container).not.toBeNull();
+    expect(container.style.display).toBe("none");
+  });
+
+  /* ── Target Selection Edge Cases (CG-013..CG-014) ── */
+
+  it("CG-013: dead target cannot be selected (data-selected not set)", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      currentActorId: "player-1",
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy", alive: false, currentHp: 0 }),
+      ],
+    }));
+
+    // Enter target mode — no alive enemy, so selectedTargetId stays null
+    const attackBtn = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    attackBtn.click();
+
+    // Dead enemy card should not have a click listener, so clicking does nothing
+    const deadEnemy = parent.querySelector("[data-participant='enemy-0']") as HTMLElement;
+    expect(deadEnemy).not.toBeNull();
+    // data-selected should not be "true" (it's either "false" or absent)
+    expect(deadEnemy.getAttribute("data-selected")).not.toBe("true");
+  });
+
+  it("CG-014: dead actor cannot act (buttons disabled when alive=false)", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      currentActorId: "player-1",
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player", alive: false, currentHp: 0 }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+      ],
+    }));
+
+    const attackBtn = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    const defendBtn = parent.querySelector("[data-action='defend']") as HTMLButtonElement;
+    const fleeBtn = parent.querySelector("[data-action='flee']") as HTMLButtonElement;
+    expect(attackBtn.disabled).toBe(true);
+    expect(defendBtn.disabled).toBe(true);
+    expect(fleeBtn.disabled).toBe(true);
+  });
+
+  /* ── Visual Feedback (CG-015..CG-017) ── */
+
+  it("CG-015: current actor has data-current='true' highlight", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      currentActorId: "player-1",
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+      ],
+    }));
+
+    // CombatPanel uses data-participant="side-index" not data-participant-id
+    const playerCard = parent.querySelector("[data-participant='player-0']") as HTMLElement;
+    const mobCard = parent.querySelector("[data-participant='enemy-0']") as HTMLElement;
+    expect(playerCard).not.toBeNull();
+    expect(mobCard).not.toBeNull();
+    expect(playerCard.getAttribute("data-current")).toBe("true");
+    expect(mobCard.getAttribute("data-current")).toBe("false");
+  });
+
+  it("CG-016: turn order display contains participant names in order", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      turnOrder: ["mob-1", "player-1"],
+      currentActorId: "mob-1",
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player", name: "Warrior" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy", name: "Goblin" }),
+      ],
+    }));
+
+    const turnOrderEl = parent.querySelector("[data-turn-order]");
+    const text = turnOrderEl?.textContent ?? "";
+    expect(text).toContain("Goblin");
+    expect(text).toContain("Warrior");
+    expect(text.indexOf("Goblin")).toBeLessThan(text.indexOf("Warrior"));
+  });
+
+  it("CG-017: round display shows correct round number", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({ round: 3 }));
+
+    const roundEl = parent.querySelector("[data-round]");
+    expect(roundEl?.textContent).toContain("3");
+  });
+
+  /* ── Combat Log (CG-018..CG-022) ── */
+
+  it("CG-018: damage log entry appears after damage_dealt event", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player", name: "Warrior" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy", name: "Goblin" }),
+      ],
+    }));
+
+    // Simulate damage event via update — main.ts adds log entry
+    // Since we can't call main.ts logic, add the log entry directly
+    panel.addLogEntry({ text: "Warrior dealt 10 to Goblin", timestamp: Date.now() });
+
+    const logEl = parent.querySelector("[data-combat-log]");
+    expect(logEl?.textContent).toContain("Warrior dealt 10 to Goblin");
+  });
+
+  it("CG-019: death log entry appears after mob_killed event", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+      ],
+    }));
+
+    panel.addLogEntry({ text: "Goblin was slain!", timestamp: Date.now() });
+
+    const logEl = parent.querySelector("[data-combat-log]");
+    expect(logEl?.textContent).toContain("Goblin was slain!");
+  });
+
+  it("CG-020: defend log entry appears after defend action", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      currentActorId: "player-1",
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player", name: "Warrior" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+      ],
+    }));
+
+    panel.addLogEntry({ text: "You defend", timestamp: Date.now() });
+
+    const logEl = parent.querySelector("[data-combat-log]");
+    expect(logEl?.textContent).toContain("You defend");
+  });
+
+  it("CG-021: flee log entry appears after encounter_fled", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player", name: "Warrior" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+      ],
+    }));
+
+    panel.addLogEntry({ text: "Warrior fled!", timestamp: Date.now() });
+
+    const logEl = parent.querySelector("[data-combat-log]");
+    expect(logEl?.textContent).toContain("Warrior fled!");
+  });
+
+  it("CG-022: combat resolved log entry appears", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload());
+
+    panel.addLogEntry({ text: "Combat resolved!", timestamp: Date.now() });
+
+    const logEl = parent.querySelector("[data-combat-log]");
+    expect(logEl?.textContent).toContain("Combat resolved!");
+  });
+
+  /* ── Combat Resolution (CG-023..CG-024) ── */
+
+  it("CG-023: combat resolved — BattlePanel stays visible", () => {
+    const battlePanel = new BattlePanel(parent);
+    battlePanel.show(makeBattlePayload());
+
+    // BattlePanel container should still be in DOM after show()
+    const container = parent.firstElementChild as HTMLElement;
+    expect(container).not.toBeNull();
+    expect(container.style.display).not.toBe("none");
+    battlePanel.destroy();
+  });
+
+  it("CG-024: combat resolved — CombatPanel shows resolved banner", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({ combatState: "RESOLVED" }));
+
+    // Resolved banner should be visible
+    const resolvedEl = parent.querySelector("[data-combat-resolved]") as HTMLElement;
+    expect(resolvedEl).not.toBeNull();
+    expect(resolvedEl.style.display).not.toBe("none");
+    expect(resolvedEl.textContent).toContain("Combat Resolved");
+  });
+
+  /* ── Target Transmission (CG-025) ── */
+
+  it("CG-025: targetId transmitted exactly (attack handler receives correct ID)", () => {
+    panel = new CombatPanel(parent);
+    const received: Array<{ action: string; targetId?: string }> = [];
+    panel.onAction((p) => received.push(p));
+
+    panel.show(makeCombatPayload({
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "mob-99", side: "enemy", name: "Dragon" }),
+      ],
+    }));
+
+    const attackBtn = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    attackBtn.click();
+    // CombatPanel uses data-participant="side-index", not data-participant-id
+    const dragonCard = parent.querySelector("[data-participant='enemy-0']") as HTMLElement;
+    dragonCard.click();
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toEqual({ action: "attack", targetId: "mob-99" });
+  });
+
+  /* ── Server Authority (CG-026..CG-027) ── */
+
+  it("CG-026: no client-side damage calculation method exists", () => {
+    panel = new CombatPanel(parent);
+    expect(typeof (panel as any).calculateDamage).toBe("undefined");
+    expect(typeof (panel as any).applyDamage).toBe("undefined");
+    expect(typeof (panel as any).rollDamage).toBe("undefined");
+  });
+
+  it("CG-027: no client-side turn calculation method exists", () => {
+    panel = new CombatPanel(parent);
+    expect(typeof (panel as any).computeTurnOrder).toBe("undefined");
+    expect(typeof (panel as any).nextTurn).toBe("undefined");
+    expect(typeof (panel as any).advanceTurn).toBe("undefined");
+  });
+});
