@@ -186,7 +186,12 @@ async function main() {
 
   // Combat panel UI (DOM overlay — turn-based combat with actions)
   const combatPanel = new CombatPanel(container);
+  let combatPanelInitialized = false;
   combatPanel.onAction((payload: CombatPanelActionPayload) => {
+    // Log defend action locally (server doesn't emit a defend event)
+    if (payload.action === "defend") {
+      combatPanel.addLogEntry({ text: "You defend", timestamp: Date.now() });
+    }
     network.sendEncounterAction(payload.action, payload.targetId);
   });
 
@@ -300,16 +305,25 @@ async function main() {
             side: p.side,
           };
         });
-        combatPanel.show({
+        const payload = {
           combatState: gameState.combat.state,
           round: gameState.combat.round,
           currentActorId: gameState.combat.currentActorId,
           turnOrder: [...gameState.combat.turnOrder],
           participants,
           localPlayerId: localId,
-        });
+        };
+        if (!combatPanelInitialized) {
+          combatPanel.show(payload);
+          combatPanelInitialized = true;
+        } else {
+          combatPanel.update(payload);
+        }
 
         // Combat log entries from events
+        if (normalized.type === "encounter_started") {
+          combatPanel.addLogEntry({ text: "Combat begins!", timestamp: Date.now() });
+        }
         if (normalized.type === "damage_dealt" || normalized.type === "player_damaged") {
           const sourceName = normalized.sourceId === localId ? "You" : normalized.sourceId.slice(0, 8);
           const targetName = normalized.targetId === localId ? "You" : normalized.targetId.slice(0, 8);
@@ -330,11 +344,24 @@ async function main() {
         if (normalized.type === "player_damaged") {
           combatPanel.addLogEntry({ text: `Round ${gameState.combat.round} begins`, timestamp: Date.now() });
         }
+        if (normalized.type === "xp_gained") {
+          combatPanel.addLogEntry({ text: `Gained ${normalized.xp} XP`, timestamp: Date.now() });
+        }
+        if (normalized.type === "level_up") {
+          combatPanel.addLogEntry({ text: `Level up! Now level ${normalized.level}`, timestamp: Date.now() });
+        }
+        if (normalized.type === "loot_dropped") {
+          combatPanel.addLogEntry({ text: `Received loot: ${normalized.loot?.join(", ") ?? "items"}`, timestamp: Date.now() });
+        }
+        if (gameState.combat.state === "RESOLVED") {
+          combatPanel.addLogEntry({ text: "Combat resolved!", timestamp: Date.now() });
+        }
       }
 
       // Hide panels when combat/battle ends
       if (!gameState.combat) {
         combatPanel.hide();
+        combatPanelInitialized = false;
       }
       if (!gameState.battle) {
         battlePanel.hide();
