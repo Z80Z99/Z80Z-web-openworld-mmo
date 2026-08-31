@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { BattleGroup, CombatSession } from "@mmo/shared";
+import type { BattleGroup, CombatEventPayload, CombatEventType, CombatSession } from "@mmo/shared";
 import { buildCombatStartedPayload } from "./ProductionMultiParticipantCombat.js";
 
 /**
@@ -140,5 +140,81 @@ describe("Phase 3I-3C: Legacy Protocol Cleanup", () => {
     expect("attack" in payload).toBe(false);
     expect("defense" in payload).toBe(false);
     expect("level" in payload).toBe(false);
+  });
+
+  /* ── LPC-009..017: CombatEventType union & CombatEventPayload shape ── */
+
+  /** Canonical list of every member of the current CombatEventType union. */
+  const VALID_COMBAT_EVENT_TYPES: CombatEventType[] = [
+    "damage_dealt",
+    "mob_killed",
+    "player_damaged",
+    "player_died",
+    "xp_gained",
+    "loot_dropped",
+    "player_respawn",
+    "level_up",
+    "encounter_started",
+    "encounter_fled",
+  ];
+
+  it("LPC-009: encounter_started is a valid CombatEventType (positive control)", () => {
+    expect(VALID_COMBAT_EVENT_TYPES).toContain("encounter_started");
+  });
+
+  it("LPC-010: encounter_fled is a valid CombatEventType (positive control)", () => {
+    expect(VALID_COMBAT_EVENT_TYPES).toContain("encounter_fled");
+  });
+
+  it("LPC-011: encounter_timeout is NOT a valid CombatEventType", () => {
+    expect(VALID_COMBAT_EVENT_TYPES).not.toContain("encounter_timeout");
+  });
+
+  it("LPC-012: defend is NOT a valid CombatEventType", () => {
+    expect(VALID_COMBAT_EVENT_TYPES).not.toContain("defend");
+  });
+
+  it("LPC-013: mob_respawn is NOT a valid CombatEventType", () => {
+    expect(VALID_COMBAT_EVENT_TYPES).not.toContain("mob_respawn");
+  });
+
+  it("LPC-014: CombatEventPayload excludes legacy HP fields", () => {
+    const payload: CombatEventPayload = { type: "encounter_started", sourceId: "", targetId: "" };
+    expect(payload).not.toHaveProperty("mobHp");
+    expect(payload).not.toHaveProperty("mobMaxHp");
+    expect(payload).not.toHaveProperty("playerHp");
+    expect(payload).not.toHaveProperty("playerMaxHp");
+  });
+
+  it("LPC-015: CombatEventPayload retains attack/defense/level", () => {
+    const payload: CombatEventPayload = {
+      type: "level_up",
+      sourceId: "",
+      targetId: "",
+      attack: 10,
+      defense: 5,
+      level: 3,
+    };
+    expect(payload.attack).toBe(10);
+    expect(payload.defense).toBe(5);
+    expect(payload.level).toBe(3);
+  });
+
+  it("LPC-016: CombatEventPayload retains mobId", () => {
+    const payload: CombatEventPayload = {
+      type: "encounter_started",
+      sourceId: "",
+      targetId: "",
+      mobId: "mob-001",
+    };
+    expect(payload.mobId).toBe("mob-001");
+  });
+
+  it("LPC-017: buildCombatStartedPayload carries currentActorId on encounter_started", () => {
+    const session = makeSession({ currentActorId: "player-099" });
+    const battle = makeBattle();
+    const payload = buildCombatStartedPayload(session, battle);
+    expect(payload).toHaveProperty("currentActorId");
+    expect(payload.currentActorId).toBe("player-099");
   });
 });

@@ -262,34 +262,6 @@ describe("Combat State Updates", () => {
     expect(mob.alive).toBe(false);
     expect(mob.currentHp).toBe(0);
   });
-
-  it("CEM-012: encounter_timeout sets combat RESOLVED", () => {
-    const gs = makeGameState("mob1", 80, 100);
-
-    // Setup: start encounter
-    const startRaw = {
-      type: "encounter_started",
-      sourceId: "p1",
-      targetId: "mob1",
-      mobId: "mob1",
-      combatId: "combat-abc",
-      currentActorId: "p1",
-    } as any;
-    const startEvent = normalizeCombatEvent(startRaw)!;
-    gs.updateCombatFromEvent(startEvent);
-    gs.updateBattleFromEvent(startEvent);
-
-    // Encounter times out
-    const timeoutRaw = {
-      type: "encounter_timeout",
-      sourceId: "p1",
-      targetId: "mob1",
-    } as any;
-    const timeoutEvent = normalizeCombatEvent(timeoutRaw)!;
-    gs.updateCombatFromEvent(timeoutEvent);
-
-    expect(gs.combat!.state).toBe("RESOLVED");
-  });
 });
 
 /* ═══════════════════════════════════════════════════════
@@ -532,45 +504,6 @@ describe("Idempotence", () => {
 
     // HP remains at 60 — server is authoritative, not accumulated
     expect(gs.combat!.participants.find(p => p.participantId === "mob1")!.currentHp).toBe(60);
-  });
-});
-
-/* ═══════════════════════════════════════════════════════
- * CEM-020: Lifecycle Independence
- *
- * Battle and combat have independent lifecycle states.
- * ═══════════════════════════════════════════════════════ */
-
-describe("Lifecycle Independence", () => {
-  it("CEM-020: Battle ACTIVE while combat RESOLVED", () => {
-    const gs = makeGameState("mob1", 80, 100);
-
-    // Setup: start encounter
-    const startRaw = {
-      type: "encounter_started",
-      sourceId: "p1",
-      targetId: "mob1",
-      mobId: "mob1",
-      combatId: "combat-abc",
-      currentActorId: "p1",
-    } as any;
-    const startEvent = normalizeCombatEvent(startRaw)!;
-    gs.updateCombatFromEvent(startEvent);
-    gs.updateBattleFromEvent(startEvent);
-
-    // Combat resolves
-    const timeoutRaw = {
-      type: "encounter_timeout",
-      sourceId: "p1",
-      targetId: "mob1",
-    } as any;
-    const timeoutEvent = normalizeCombatEvent(timeoutRaw)!;
-    gs.updateCombatFromEvent(timeoutEvent);
-    gs.updateBattleFromEvent(timeoutEvent);
-
-    // Combat is resolved but battle side remains active
-    expect(gs.combat!.state).toBe("RESOLVED");
-    expect(gs.battle!.enemySide.state).toBe("ACTIVE");
   });
 });
 

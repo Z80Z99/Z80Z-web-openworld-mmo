@@ -316,9 +316,6 @@ async function main() {
         if (normalized.type === "player_died") {
           combatPanel.addLogEntry({ text: `${normalized.targetId === localId ? "You" : normalized.targetId.slice(0, 8)} have fallen!`, timestamp: Date.now() });
         }
-        if (normalized.type === "defend") {
-          combatPanel.addLogEntry({ text: `${normalized.sourceId === localId ? "You" : normalized.sourceId.slice(0, 8)} is defending`, timestamp: Date.now() });
-        }
         if (normalized.type === "encounter_fled") {
           combatPanel.addLogEntry({ text: `${normalized.sourceId.slice(0, 8)} fled!`, timestamp: Date.now() });
         }

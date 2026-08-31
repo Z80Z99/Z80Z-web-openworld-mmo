@@ -108,12 +108,6 @@ export interface NormalizedEncounterFled {
   readonly targetId: string;
 }
 
-export interface NormalizedEncounterTimeout {
-  readonly type: "encounter_timeout";
-  readonly sourceId: string;
-  readonly targetId: string;
-}
-
 export interface NormalizedXpGained {
   readonly type: "xp_gained";
   readonly sourceId: string;
@@ -145,12 +139,6 @@ export interface NormalizedLootDropped {
   readonly loot: string[];
 }
 
-export interface NormalizedDefend {
-  readonly type: "defend";
-  readonly sourceId: string;
-  readonly targetId: string;
-}
-
 export type NormalizedCombatEvent =
   | NormalizedEncounterStarted
   | NormalizedDamageDealt
@@ -158,12 +146,10 @@ export type NormalizedCombatEvent =
   | NormalizedMobKilled
   | NormalizedPlayerDied
   | NormalizedEncounterFled
-  | NormalizedEncounterTimeout
   | NormalizedXpGained
   | NormalizedLevelUp
   | NormalizedPlayerRespawn
-  | NormalizedLootDropped
-  | NormalizedDefend;
+  | NormalizedLootDropped;
 
 /* ── Normalizer ── */
 
@@ -185,8 +171,6 @@ export function normalizeCombatEvent(raw: RawCombatEvent): NormalizedCombatEvent
       return normalizeTerminal(raw, "player_died");
     case "encounter_fled":
       return normalizeTerminal(raw, "encounter_fled");
-    case "encounter_timeout":
-      return normalizeTerminal(raw, "encounter_timeout");
     case "xp_gained":
       return normalizeXpGained(raw);
     case "level_up":
@@ -195,8 +179,6 @@ export function normalizeCombatEvent(raw: RawCombatEvent): NormalizedCombatEvent
       return normalizePlayerRespawn(raw);
     case "loot_dropped":
       return normalizeLootDropped(raw);
-    case "defend":
-      return normalizeDefend(raw);
     default:
       return null;
   }
@@ -238,8 +220,8 @@ function normalizePlayerDamaged(raw: RawCombatEvent): NormalizedPlayerDamaged | 
 
 function normalizeTerminal(
   raw: RawCombatEvent,
-  type: "mob_killed" | "player_died" | "encounter_fled" | "encounter_timeout",
-): NormalizedMobKilled | NormalizedPlayerDied | NormalizedEncounterFled | NormalizedEncounterTimeout | null {
+  type: "mob_killed" | "player_died" | "encounter_fled",
+): NormalizedMobKilled | NormalizedPlayerDied | NormalizedEncounterFled | null {
   if (!raw.sourceId || !raw.targetId) return null;
   if (type === "mob_killed") {
     return { type, sourceId: raw.sourceId, targetId: raw.targetId, mobType: raw.mobType };
@@ -287,16 +269,6 @@ function normalizeLootDropped(raw: RawCombatEvent): NormalizedLootDropped | null
     sourceId: raw.sourceId,
     targetId: raw.targetId,
     loot: raw.loot ?? [],
-  };
-}
-
-function normalizeDefend(raw: RawCombatEvent): NormalizedDefend | null {
-  // defend event has targetId but may lack sourceId (server inconsistency)
-  if (!raw.targetId) return null;
-  return {
-    type: "defend",
-    sourceId: raw.sourceId ?? raw.targetId,
-    targetId: raw.targetId,
   };
 }
 

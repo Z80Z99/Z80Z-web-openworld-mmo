@@ -68,11 +68,8 @@ export type CombatEventType =
   | "loot_dropped"
   | "player_respawn"
   | "level_up"
-  | "mob_respawn"
   | "encounter_started"
-  | "defend"
-  | "encounter_fled"
-  | "encounter_timeout";
+  | "encounter_fled";
 
 /**
  * Unified server→client combat event payload.

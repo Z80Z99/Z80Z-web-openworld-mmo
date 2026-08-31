@@ -165,12 +165,6 @@ export class GameState {
         break;
       }
 
-      case "encounter_timeout": {
-        if (!this.combat) break;
-        this.combat = { ...this.combat, state: "RESOLVED" };
-        break;
-      }
-
       case "xp_gained": {
         this.xp += event.xp;
         break;
@@ -195,11 +189,6 @@ export class GameState {
 
       case "loot_dropped": {
         // No state change — pass-through for UI consumption
-        break;
-      }
-
-      case "defend": {
-        // No-op: defend affects server-side state only
         break;
       }
     }
@@ -265,11 +254,6 @@ export class GameState {
           }),
         };
         this.battle = { ...this.battle, enemySide: updatedEnemy };
-        break;
-      }
-
-      case "encounter_timeout": {
-        // Battle stays ACTIVE — combat resolved doesn't auto-resolve battle
         break;
       }
 
