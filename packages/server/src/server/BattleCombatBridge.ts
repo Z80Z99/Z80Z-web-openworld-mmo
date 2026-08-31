@@ -1,5 +1,5 @@
 /**
- * BattleCombatBridge â€” Orchestration layer between BattleManager and CombatManager.
+ * BattleCombatBridge â€?Orchestration layer between BattleManager and CombatManager.
  *
  * Converts eligible battle participants into combat participants by reading
  * World entity HP via an injectable HpProvider, creating CombatParticipantState
@@ -8,15 +8,15 @@
  * Responsibilities:
  *   - Validate battle exists and no active combat already present
  *   - Filter ELIMINATED and dead (HP <= 0) participants
- *   - Map BattleParticipant â†’ CombatParticipantState
+ *   - Map BattleParticipant â†?CombatParticipantState
  *   - Create CombatSession via CombatManager
- *   - Maintain battleId â†’ combatId mapping
+ *   - Maintain battleId â†?combatId mapping
  *
  * Does NOT:
  *   - Modify World HP
  *   - Calculate damage
  *   - Handle XP / Loot
- *   - Replace EncounterSystem
+ *   - Replace EncounterSystem (removed in 3I-3B)
  */
 
 import type {
@@ -98,7 +98,7 @@ export class BattleCombatBridge {
       if (!session || session.state === "RESOLVED") return;
 
       // If the current actor is on the same side as the new leader
-      // but is NOT the new leader, the old leader was replaced â€” advance turn.
+      // but is NOT the new leader, the old leader was replaced â€?advance turn.
       if (session.currentActorId === newLeaderId) return;
 
       const newLeaderParticipant = session.participants.find(
@@ -272,11 +272,11 @@ export class BattleCombatBridge {
     // Check CombatManager directly for existing session
     const existingSession = this.combatManager.getCombatSessionByBattle(battleId);
     if (existingSession) {
-      // Already resolved â€” return it
+      // Already resolved â€?return it
       if (existingSession.state === "RESOLVED") {
         return { session: existingSession };
       }
-      // Active â€” resolve it
+      // Active â€?resolve it
       const result = this.combatManager.setCombatState(existingSession.id, "RESOLVED");
       if ("error" in result) {
         return { error: "COMBAT_CREATION_FAILED" };
@@ -285,11 +285,11 @@ export class BattleCombatBridge {
       this.battleManager.offLeaderTransfer(battleId);
       return { session: result.session };
     }
-    // Mapping was already cleaned up by resolveCombat â€” idempotent success
+    // Mapping was already cleaned up by resolveCombat â€?idempotent success
     if (this.resolvedBattleIds.has(battleId)) {
       return { error: "COMBAT_RESOLVED" };
     }
-    // No session at all â€” return error
+    // No session at all â€?return error
     return { error: "BATTLE_NOT_FOUND" };
   }
 
@@ -385,7 +385,7 @@ export class BattleCombatBridge {
       side,
     };
 
-    // 6. Delegate to CombatManager (pending â€” enters turn order next round)
+    // 6. Delegate to CombatManager (pending â€?enters turn order next round)
     const result = this.combatManager.addPendingCombatParticipant(combatId, {
       ...combatParticipant,
       id: combatParticipant.participantId,
@@ -405,7 +405,7 @@ export class BattleCombatBridge {
    * MF3-021 / Bug #1+#3: Sync FLEEING state from BattleManager to CombatManager.
    * Reads battle participant states and marks matching combat participants as
    * FLEEING. Covers both turnOrder members (removed from rotation) and pending
-   * members (kept queued â€” flushPendingParticipants skips them until rejoin).
+   * members (kept queued â€?flushPendingParticipants skips them until rejoin).
    * Idempotent: repeated calls converge (setParticipantFleeing is a no-op for
    * already-fleeing participants, FR-011).
    */
@@ -433,7 +433,7 @@ export class BattleCombatBridge {
 
     // Mark every combat participant whose battle state is FLEEING.
     // setParticipantFleeing handles turnOrder removal, pending retention and
-    // current-actor advancement (Case B â€” no premature round++/flush).
+    // current-actor advancement (Case B â€?no premature round++/flush).
     for (const bp of allBattleParticipants) {
       if (bp.state === "FLEEING") {
         const inCombat = combatSession.participants.some(
@@ -455,7 +455,7 @@ export class BattleCombatBridge {
   /**
    * Bug #1 fix: Sync REJOIN state from BattleManager to CombatManager.
    * For every combat participant marked FLEEING whose battle participant state
-   * is back to ACTIVE (battle-side FLEEING â†’ ACTIVE rejoin), call
+   * is back to ACTIVE (battle-side FLEEING â†?ACTIVE rejoin), call
    * rejoinCombatParticipant so turn eligibility is restored at the next round
    * boundary. Idempotent: repeated calls converge (FR-012).
    */

@@ -1,11 +1,8 @@
 import type { Room } from "@colyseus/core";
-import { RoomState, PlayerState, EntityState, TileState, TICK_RATE, MOVE_SPEED, CHUNK_SIZE } from "@mmo/shared";
+import { RoomState, EntityState, TileState, TICK_RATE } from "@mmo/shared";
 import type Database from "better-sqlite3";
 import { AOIManager } from "./AOI.js";
 import { MovementSystem } from "./MovementSystem.js";
-import type { MovementCommand } from "./MovementSystem.js";
-import { CombatSystem } from "./CombatSystem.js";
-import { EncounterSystem } from "./EncounterSystem.js";
 import { MobSpawner } from "./MobSpawner.js";
 import { BattleManager } from "./BattleManager.js";
 import { CombatManager } from "./CombatManager.js";
@@ -16,7 +13,7 @@ import {
   notifyCombatJoinedPlayers,
   type ProductionCombatDeps,
 } from "./ProductionCombatRouter.js";
-import { emitBattleCleanup, type CombatLogDeps } from "./ProductionCombatLog.js";
+import { emitBattleCleanup } from "./ProductionCombatLog.js";
 
 /**
  * Server-side game loop running at 20 Hz.
@@ -31,8 +28,6 @@ export class GameLoop {
   private db: Database.Database;
   private aoi: AOIManager;
   private movementSystem: MovementSystem;
-  private combatSystem: CombatSystem;
-  private encounterSystem: EncounterSystem;
   private mobSpawner: MobSpawner;
   private battleManager: BattleManager;
   private combatManager: CombatManager;
@@ -46,8 +41,6 @@ export class GameLoop {
     db: Database.Database,
     aoi: AOIManager,
     movementSystem: MovementSystem,
-    combatSystem: CombatSystem,
-    encounterSystem: EncounterSystem,
     mobSpawner: MobSpawner,
     battleManager: BattleManager,
     combatManager: CombatManager,
@@ -58,8 +51,6 @@ export class GameLoop {
     this.db = db;
     this.aoi = aoi;
     this.movementSystem = movementSystem;
-    this.combatSystem = combatSystem;
-    this.encounterSystem = encounterSystem;
     this.mobSpawner = mobSpawner;
     this.battleManager = battleManager;
     this.combatManager = combatManager;
@@ -415,15 +406,13 @@ export function createGameLoop(
   db: Database.Database,
   aoi: AOIManager,
   movementSystem: MovementSystem,
-  combatSystem: CombatSystem,
-  encounterSystem: EncounterSystem,
   mobSpawner: MobSpawner,
   battleManager: BattleManager,
   combatManager: CombatManager,
   bridge: BattleCombatBridge,
   productionCombatDeps?: ProductionCombatDeps,
 ): GameLoop {
-  const loop = new GameLoop(room, db, aoi, movementSystem, combatSystem, encounterSystem, mobSpawner, battleManager, combatManager, bridge, productionCombatDeps);
+  const loop = new GameLoop(room, db, aoi, movementSystem, mobSpawner, battleManager, combatManager, bridge, productionCombatDeps);
   const tickInterval = 1000 / TICK_RATE;
   room.setSimulationInterval(loop.tick, tickInterval);
   return loop;

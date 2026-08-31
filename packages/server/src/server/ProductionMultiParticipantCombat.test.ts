@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import type {
   BattleGroup,
   CombatPoint,
@@ -25,8 +25,7 @@ import {
   resolveEncounterTarget,
 } from "./ProductionMultiParticipantCombat.js";
 
-/* ═══════════════════════════════════════════════════════
- * Phase 3G-3 — Multi-Participant Production Combat (MP-001..030)
+/* ══════════════════════════════════════════════════════�? * Phase 3G-3 �?Multi-Participant Production Combat (MP-001..030)
  *
  * Every test drives the REAL production functions GameRoom/GameLoop call:
  * routeRealtimeAttack / routeEncounterAction / routeEncounterDefend /
@@ -35,9 +34,9 @@ import {
  * notifyCombatJoinedPlayers + the cleanup trio.
  *
  * Deterministic stats: player attack 10 / defense 5 / level 1; mob baseHp 30,
- * baseAttack 5, baseDefense 1, level 1.  player→mob damage = round(10·1.1−1)=10;
- * mob→player damage = max(1, round(5·1.1−5))=1.
- * ═══════════════════════════════════════════════════════ */
+ * baseAttack 5, baseDefense 1, level 1.  player→mob damage = round(10·1.1�?)=10;
+ * mob→player damage = max(1, round(5·1.1�?))=1.
+ * ══════════════════════════════════════════════════════�?*/
 
 const point = (x: number, y: number): CombatPoint => ({ x, y });
 
@@ -175,7 +174,7 @@ function addMob(w: World, id: string, hp = 30, x = 1, y = 0): MobInstance {
   return mob;
 }
 
-/** Drive a round boundary flush: enemy turn wraps to index 0 → pending flush. */
+/** Drive a round boundary flush: enemy turn wraps to index 0 �?pending flush. */
 function driveRoundBoundary(w: World, now = Date.now()): void {
   tickCombatEnemyTurns(w.deps, now + BATTLE_MOB_TURN_DELAY_MS);
 }
@@ -191,13 +190,9 @@ function autoJoin(
   w.bridge.syncParticipants(battleId, { getHp: w.deps.getHp });
 }
 
-describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
-  afterEach(() => {
-    delete process.env.ENABLE_BATTLE_COMBAT;
-  });
-
+describe("Phase 3G-3 �?Multi-Participant Production Combat", () => {
   describe("2v1 production (MP-001..009)", () => {
-    it("MP-001: 2v1 — second player joins an ACTIVE combat as pending (not blocked)", () => {
+    it("MP-001: 2v1 �?second player joins an ACTIVE combat as pending (not blocked)", () => {
       const w = makeWorld();
       addPlayer(w, "player-A");
       addPlayer(w, "player-B");
@@ -215,13 +210,13 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       )!;
       expect(session.pendingParticipants.some((p) => p.participantId === "player-B")).toBe(true);
 
-      // Repeated join attempt → blocked (no double-pending)
+      // Repeated join attempt �?blocked (no double-pending)
       const r3 = routeRealtimeAttack(w.deps, "player-B", x);
       expect(r3.kind).toBe("blocked");
       expect(session.pendingParticipants.filter((p) => p.participantId === "player-B").length).toBe(1);
     });
 
-    it("MP-002: 1v2 — a mob joins via battle membership sync and becomes pending", () => {
+    it("MP-002: 1v2 �?a mob joins via battle membership sync and becomes pending", () => {
       const w = makeWorld();
       addPlayer(w, "player-A");
       const x = addMob(w, "mob-X");
@@ -230,7 +225,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       routeRealtimeAttack(w.deps, "player-A", x);
       const battle = w.bm.getBattleByParticipant("player-A")!.battle;
 
-      // Mob Y auto-joins the battle (GameLoop evaluateDynamicJoin → addParticipant)
+      // Mob Y auto-joins the battle (GameLoop evaluateDynamicJoin �?addParticipant)
       autoJoin(w, battle.id, {
         id: "mob-Y",
         position: point(1, 1),
@@ -242,7 +237,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       let session = w.cm.getCombatSessionByBattle(battle.id)!;
       expect(session.pendingParticipants.some((p) => p.participantId === "mob-Y")).toBe(true);
 
-      // Next round boundary → Y flushed into turnOrder
+      // Next round boundary �?Y flushed into turnOrder
       driveRoundBoundary(w);
       session = w.cm.getCombatSessionByBattle(battle.id)!;
       expect(session.turnOrder).toContain("mob-Y");
@@ -254,7 +249,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       addPlayer(w, "player-B");
       const x = addMob(w, "mob-X");
 
-      routeRealtimeAttack(w.deps, "player-A", x); // X: 30 → 20
+      routeRealtimeAttack(w.deps, "player-A", x); // X: 30 �?20
       const before = x.currentHp;
       const r = routeRealtimeAttack(w.deps, "player-B", x);
       expect(r.kind).toBe("joined");
@@ -309,8 +304,8 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       const session = w.cm.getCombatSessionByBattle(
         w.bm.getBattleByParticipant("player-A")!.battle.id,
       )!;
-      // A is currentActor after its opening hit? No — the turn advanced to X.
-      // Force a known actor: B (pending) is NOT currentActor → NOT_CURRENT_ACTOR.
+      // A is currentActor after its opening hit? No �?the turn advanced to X.
+      // Force a known actor: B (pending) is NOT currentActor �?NOT_CURRENT_ACTOR.
       const result = w.cm.applyAttack(
         session.id,
         { actorId: "player-B", targetId: "mob-X", actionType: "ATTACK" },
@@ -319,7 +314,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       expect("error" in result && result.error === "NOT_CURRENT_ACTOR").toBe(true);
     });
 
-    it("MP-007: joined participant is pending — not in turnOrder", () => {
+    it("MP-007: joined participant is pending �?not in turnOrder", () => {
       const w = makeWorld();
       addPlayer(w, "player-A");
       addPlayer(w, "player-B");
@@ -385,7 +380,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       const battle = w.bm.getBattleByParticipant("player-A")!.battle;
       driveRoundBoundary(w); // flush B
 
-      // A's turn → routeEncounterAction targets enemy leader X
+      // A's turn �?routeEncounterAction targets enemy leader X
       const r = routeEncounterAction(w.deps, "player-A");
       expect(r.kind).toBe("combat");
       expect(r.damage?.targetId).toBe("mob-X");
@@ -413,7 +408,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       expect(r.damage?.targetKilled).toBe(true);
       expect(w.kills.filter((k) => k.mobId === "mob-X").length).toBe(1);
 
-      // Y (current actor) counter-attacks → wraps back to A
+      // Y (current actor) counter-attacks �?wraps back to A
       driveRoundBoundary(w);
       // Next player action targets the new leader (Y)
       r = routeEncounterAction(w.deps, "player-A");
@@ -465,7 +460,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       const w = makeWorld();
       addPlayer(w, "player-A");
       const x = addMob(w, "mob-X");
-      routeRealtimeAttack(w.deps, "player-A", x); // turn → X
+      routeRealtimeAttack(w.deps, "player-A", x); // turn �?X
       driveRoundBoundary(w); // X attacks A
       expect(w.players.get("player-A")!.health).toBe(99); // exactly 1 damage
       const damaged = w.events.filter((e) => e.type === "player_damaged");
@@ -479,10 +474,10 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       const x = addMob(w, "mob-X");
       routeRealtimeAttack(w.deps, "player-A", x);
       expect(x.aggroTarget).toBe("player-A");
-      routeRealtimeAttack(w.deps, "player-B", x); // join → aggro to B
+      routeRealtimeAttack(w.deps, "player-B", x); // join �?aggro to B
       expect(x.aggroTarget).toBe("player-B");
 
-      driveRoundBoundary(w); // X's turn (aggro B) → damages B
+      driveRoundBoundary(w); // X's turn (aggro B) �?damages B
       expect(w.players.get("player-B")!.health).toBe(99);
       expect(w.players.get("player-A")!.health).toBe(100);
     });
@@ -492,7 +487,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       addPlayer(w, "player-A");
       addPlayer(w, "player-B");
       const x = addMob(w, "mob-X");
-      routeRealtimeAttack(w.deps, "player-A", x); // turn → X
+      routeRealtimeAttack(w.deps, "player-A", x); // turn �?X
       routeRealtimeAttack(w.deps, "player-B", x); // B pending
       const battle = w.bm.getBattleByParticipant("player-A")!.battle;
       const session = w.cm.getCombatSessionByBattle(battle.id)!;
@@ -514,12 +509,12 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       addPlayer(w, "player-A");
       addPlayer(w, "player-B");
       const x = addMob(w, "mob-X");
-      routeRealtimeAttack(w.deps, "player-A", x); // X 30→20, turn → X
-      driveRoundBoundary(w); // X hits A → turn → A
-      let r = routeEncounterAction(w.deps, "player-A"); // X 20→10, turn → X
+      routeRealtimeAttack(w.deps, "player-A", x); // X 30�?0, turn �?X
+      driveRoundBoundary(w); // X hits A �?turn �?A
+      let r = routeEncounterAction(w.deps, "player-A"); // X 20�?0, turn �?X
       expect(r.damage?.targetId).toBe("mob-X");
-      driveRoundBoundary(w); // X hits A → turn → A
-      r = routeEncounterAction(w.deps, "player-A"); // X 10→0 killed
+      driveRoundBoundary(w); // X hits A �?turn �?A
+      r = routeEncounterAction(w.deps, "player-A"); // X 10�? killed
       expect(r.damage?.targetKilled).toBe(true);
       const session = w.cm.getCombatSessionByBattle(
         w.bm.getBattleByParticipant("player-A")!.battle.id,
@@ -527,7 +522,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       expect(session.state).toBe("RESOLVED");
     });
 
-    it("MP-018: exactly one reward per mob kill — no double reward", () => {
+    it("MP-018: exactly one reward per mob kill �?no double reward", () => {
       const w = makeWorld();
       addPlayer(w, "player-A");
       addPlayer(w, "player-B");
@@ -594,7 +589,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       expect(session.pendingParticipants.some((p) => p.participantId === "player-B")).toBe(true);
       expect(session.turnOrder).not.toContain("player-B");
 
-      // Next round boundary → B re-enters turnOrder; HP preserved (mirrors world, not reset)
+      // Next round boundary �?B re-enters turnOrder; HP preserved (mirrors world, not reset)
       driveRoundBoundary(w);
       session = w.cm.getCombatSessionByBattle(battle.id)!;
       expect(session.turnOrder).toContain("player-B");
@@ -608,8 +603,8 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       const w = makeWorld();
       addPlayer(w, "player-A");
       const x = addMob(w, "mob-X");
-      routeRealtimeAttack(w.deps, "player-A", x); // A's hit, turn → X
-      // A's turn: X attacked → turn back to A
+      routeRealtimeAttack(w.deps, "player-A", x); // A's hit, turn �?X
+      // A's turn: X attacked �?turn back to A
       driveRoundBoundary(w);
       const battle = w.bm.getBattleByParticipant("player-A")!.battle;
       let session = w.cm.getCombatSessionByBattle(battle.id)!;
@@ -621,7 +616,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       expect(session.participants.find((p) => p.participantId === "player-A")!.defending).toBe(true);
       expect(session.currentActorId).toBe("mob-X"); // advanced
 
-      // Defend when it is not your turn → no-op
+      // Defend when it is not your turn �?no-op
       const before = session.round;
       const r2 = routeEncounterDefend({ battleManager: w.bm, combatManager: w.cm }, "player-A");
       expect(r2.kind).toBe("combat");
@@ -679,12 +674,12 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       const before = begin.session.currentActorId;
       w.cm.evaluateTurnTimeout(begin.session.id, Date.now() + BATTLE_TURN_TIMEOUT_MS + 1);
       const after = w.cm.getCombatSession(begin.session.id)!;
-      expect(after.currentActorId).toBe(before); // no timeout → no-op
+      expect(after.currentActorId).toBe(before); // no timeout �?no-op
     });
   });
 
   describe("2v2 + isolation + notification (MP-025..030)", () => {
-    it("MP-025: 2v2 dynamic join — both new participants flush into turnOrder", () => {
+    it("MP-025: 2v2 dynamic join �?both new participants flush into turnOrder", () => {
       const w = makeWorld();
       addPlayer(w, "player-A");
       addPlayer(w, "player-B");
@@ -715,14 +710,14 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       routeRealtimeAttack(w.deps, "player-A", x); // battle 1: A vs X
       const battle1 = w.bm.getBattleByParticipant("player-A")!.battle;
       autoJoin(w, battle1.id, { id: "player-B", position: point(0, 1), combatPower: 10, personality: "aggressive", state: "ACTIVE" }, "player");
-      // Separate contact: C vs Y → battle 2
+      // Separate contact: C vs Y �?battle 2
       const r = routeRealtimeAttack(w.deps, "player-C", y);
       expect(r.kind).toBe("combat");
       const battle2 = w.bm.getBattleByParticipant("player-C")!.battle;
       expect(battle1.id).not.toBe(battle2.id);
       expect(w.cm.getAllCombatMappings().length).toBe(2);
 
-      // Damage battle 1's mob — battle 2 untouched
+      // Damage battle 1's mob �?battle 2 untouched
       driveRoundBoundary(w);
       const s1 = w.cm.getCombatSessionByBattle(battle1.id)!;
       const s2 = w.cm.getCombatSessionByBattle(battle2.id)!;
@@ -743,7 +738,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       const battle = w.bm.getBattleByParticipant("player-A")!.battle;
       const session = w.cm.getCombatSessionByBattle(battle.id)!;
 
-      // B auto-joins via battle sync (no realtime attack) → not yet notified
+      // B auto-joins via battle sync (no realtime attack) �?not yet notified
       autoJoin(w, battle.id, { id: "player-B", position: point(0, 1), combatPower: 10, personality: "aggressive", state: "ACTIVE" }, "player");
       const before = w.events.filter((e) => e.type === "encounter_started" && e.mobId === "mob-X").length;
 
@@ -776,11 +771,11 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       addPlayer(w, "player-B");
       const x = addMob(w, "mob-X", 60); // high HP so the cycle doesn't kill it
       addMob(w, "mob-Y", 30, 1, 1);
-      routeRealtimeAttack(w.deps, "player-A", x); // X 60→50
+      routeRealtimeAttack(w.deps, "player-A", x); // X 60�?0
       const battle = w.bm.getBattleByParticipant("player-A")!.battle;
       autoJoin(w, battle.id, { id: "player-B", position: point(0, 1), combatPower: 10, personality: "aggressive", state: "ACTIVE" }, "player");
       autoJoin(w, battle.id, { id: "mob-Y", position: point(1, 1), combatPower: 5, personality: "aggressive", state: "ACTIVE" }, "enemy");
-      driveRoundBoundary(w); // X attacks A (aggro), flush pending, turn → A
+      driveRoundBoundary(w); // X attacks A (aggro), flush pending, turn �?A
       expect(x.currentHp).toBe(50);
 
       const aHpBefore = w.players.get("player-A")!.health; // 99
@@ -792,7 +787,7 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       expect(r2.damage?.targetId).toBe("mob-X");
       expect(x.currentHp).toBe(30); // exactly one application of 10
 
-      // X's turn (aggro follows last attacker B) → exactly one player hit by 1
+      // X's turn (aggro follows last attacker B) �?exactly one player hit by 1
       driveRoundBoundary(w);
       const damageA = aHpBefore - w.players.get("player-A")!.health;
       const damageB = bHpBefore - w.players.get("player-B")!.health;
@@ -800,14 +795,14 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       expect(w.players.get("player-B")!.health).toBe(99); // aggro B
     });
 
-    it("MP-030: 2v2 E2E — full production flow (Scenario A)", () => {
+    it("MP-030: 2v2 E2E �?full production flow (Scenario A)", () => {
       const w = makeWorld();
       addPlayer(w, "player-A");
       addPlayer(w, "player-B");
       const x = addMob(w, "mob-X");
       const y = addMob(w, "mob-Y", 30, 1, 1);
 
-      // 1. A attacks X → battle + combat created, X damaged once, aggro A
+      // 1. A attacks X �?battle + combat created, X damaged once, aggro A
       const r1 = routeRealtimeAttack(w.deps, "player-A", x);
       expect(r1.kind).toBe("combat");
       expect(x.currentHp).toBe(20);
@@ -816,38 +811,38 @@ describe("Phase 3G-3 — Multi-Participant Production Combat", () => {
       let session = w.cm.getCombatSessionByBattle(battle.id)!;
       expect(session.state).toBe("ACTIVE");
 
-      // 2. Y and B auto-join (battle + pending) — the GameLoop production path
+      // 2. Y and B auto-join (battle + pending) �?the GameLoop production path
       autoJoin(w, battle.id, { id: "mob-Y", position: point(1, 1), combatPower: 5, personality: "aggressive", state: "ACTIVE" }, "enemy");
       autoJoin(w, battle.id, { id: "player-B", position: point(0, 1), combatPower: 10, personality: "aggressive", state: "ACTIVE" }, "player");
       session = w.cm.getCombatSessionByBattle(battle.id)!;
       expect(session.participants.length).toBe(4);
       expect(session.pendingParticipants.length).toBe(2);
 
-      // 3. Round boundary → pending flush (B, Y in turnOrder)
+      // 3. Round boundary �?pending flush (B, Y in turnOrder)
       driveRoundBoundary(w);
       session = w.cm.getCombatSessionByBattle(battle.id)!;
       expect(session.turnOrder.length).toBe(4);
       expect(session.turnOrder).toContain("player-B");
       expect(session.turnOrder).toContain("mob-Y");
 
-      // 4. currentActor=A (wrap after X's counter) — A targets enemy leader X
+      // 4. currentActor=A (wrap after X's counter) �?A targets enemy leader X
       const rA = routeEncounterAction(w.deps, "player-A");
       expect(rA.damage?.targetId).toBe("mob-X");
       expect(x.currentHp).toBe(10);
 
-      // 5. B's turn — X dies (single reward)
+      // 5. B's turn �?X dies (single reward)
       const rB = routeEncounterAction(w.deps, "player-B");
       expect(rB.damage?.targetId).toBe("mob-X");
       expect(rB.damage?.targetKilled).toBe(true);
       expect(w.kills.filter((k) => k.mobId === "mob-X").length).toBe(1);
 
-      // 6. Y's counter-turn → exactly one player damaged by 1 more
-      // (total player HP drops to 198 — single enemy turn, single application)
+      // 6. Y's counter-turn �?exactly one player damaged by 1 more
+      // (total player HP drops to 198 �?single enemy turn, single application)
       driveRoundBoundary(w, Date.now());
       const totalPlayerHp = (w.players.get("player-A")?.health ?? 0) + (w.players.get("player-B")?.health ?? 0);
       expect(totalPlayerHp).toBe(198);
 
-      // 7. Kill both mobs through the turn cycle → combat RESOLVED, reward once each
+      // 7. Kill both mobs through the turn cycle �?combat RESOLVED, reward once each
       let guard = 0;
       while (w.kills.length < 2 && guard < 24) {
         driveRoundBoundary(w, Date.now());

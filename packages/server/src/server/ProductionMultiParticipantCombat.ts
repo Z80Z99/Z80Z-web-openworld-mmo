@@ -10,8 +10,9 @@
  *  - joined-player notification (encounter_started dedup via combatNotifiedPlayers)
  *  - aggro-aware enemy turns + mob combat-state release
  *
- * Single-ownership is preserved: every attack still runs Legacy XOR New Combat.
- * This module imports only shared types + managers + EncounterSystem constants,
+ * Single-ownership is preserved: every attack is owned by exactly one CombatSession.
+ * (Phase 3I-3B: Legacy EncounterSystem removed — constants now come from @mmo/shared.)
+ * This module imports only shared types + managers + battle constants,
  * so ProductionCombatRouter can import from it without a cycle.
  */
 

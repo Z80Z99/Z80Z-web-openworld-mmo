@@ -26,7 +26,6 @@ import { Auth } from "./Auth.js";
 import { AOIManager } from "./AOI.js";
 import { GameLoop, createGameLoop } from "./GameLoop.js";
 import { CombatSystem, type MobInstance } from "./CombatSystem.js";
-import { EncounterSystem } from "./EncounterSystem.js";
 import { resolveMobKill, sendEncounterEvent } from "./CombatEffects.js";
 import { MobSpawner } from "./MobSpawner.js";
 import { QuestSystem } from "./QuestSystem.js";
@@ -76,7 +75,6 @@ export class GameRoom extends Room<RoomState> {
   private worldGen!: WorldGenerator;
   private db!: Database.Database;
   private combatSystem!: CombatSystem;
-  private encounterSystem!: EncounterSystem;
   private mobSpawner!: MobSpawner;
   private questSystem!: QuestSystem;
   private movementSystem!: MovementSystem;
@@ -123,9 +121,6 @@ export class GameRoom extends Room<RoomState> {
 
     // Combat system
     this.combatSystem = new CombatSystem();
-
-    // Encounter system (turn-based combat)
-    this.encounterSystem = new EncounterSystem();
 
     // Mount system
     this.mountSystem = new MountSystem(this.db);
@@ -198,7 +193,7 @@ export class GameRoom extends Room<RoomState> {
     };
 
     // Start game loop
-    this.gameLoop = createGameLoop(this, this.db, this.aoi, this.movementSystem, this.combatSystem, this.encounterSystem, this.mobSpawner, this.battleManager, this.combatManager, this.battleCombatBridge, this.combatDeps);
+    this.gameLoop = createGameLoop(this, this.db, this.aoi, this.movementSystem, this.mobSpawner, this.battleManager, this.combatManager, this.battleCombatBridge, this.combatDeps);
 
     // Set patch rate to match tick rate
     this.setPatchRate(1000 / TICK_RATE);

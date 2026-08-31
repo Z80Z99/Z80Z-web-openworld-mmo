@@ -1,13 +1,15 @@
 /**
  * ProductionCombatRouter — 3G-2/3G-3: production Battle/Combat activation.
  *
- * Owns the single-ownership decision between the Legacy EncounterSystem and
- * the New Battle/Combat stack. Every attack is routed to EXACTLY ONE owner:
- *   - flag OFF                         → Legacy (byte-identical to HEAD cc4dd29)
+ * Owns the single-ownership decision for the New Battle/Combat stack.
+ * Every attack is routed to EXACTLY ONE owner:
  *   - mob owned by a CombatSession     → New Combat only (Legacy realtime blocked;
  *                                         a non-participant attacker JOINS pending)
- *   - flag ON, no combat yet           → New Combat (battle + combat created)
- *   - New-Combat creation fails BEFORE any side effect → safe Legacy fallback
+ *   - no combat yet                    → New Combat (battle + combat created)
+ *   - New-Combat creation fails BEFORE any side effect → safe fallback (blocked)
+ *
+ * (Phase 3I-3B: the Legacy EncounterSystem and ENABLE_BATTLE_COMBAT flag were
+ * removed — this router is the sole production combat path.)
  *
  * Multi-participant (2v1/1v2/2v2) routing primitives live in
  * ProductionMultiParticipantCombat.ts (join / target / defend / notify / enemy
