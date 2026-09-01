@@ -10,6 +10,7 @@ import { HUD, CombatUI, IdleUI, MobileUI, QuestUI, CraftingUI, ShopUI, TradeUI, 
 import type { CombatPanelActionPayload } from "./ui/index.js";
 import { normalizeCombatEvent } from "./combat/CombatEventNormalizer.js";
 import { resolveBattleParticipantHp } from "./game/resolveBattleParticipantHp.js";
+import { installQAHook } from "./qa/QAHook.js";
 
 /* ── Configuration ── */
 const SEED = DEFAULT_SEED;
@@ -35,6 +36,9 @@ async function main() {
   // Game state
   const gameState = new GameState(SEED);
 
+  // DEV-only read-only QA hook for browser combat acceptance (Phase 4A.7)
+  installQAHook(gameState);
+
   // Load character sprites (Kenney roguelikeChar_transparent.png)
   await textureManager.load();
 
@@ -58,9 +62,11 @@ async function main() {
   // Wire cross-chunk tile lookup for deterministic shore bitmask rendering
   tileRenderer.setWorldTileQuery((wx, wy) => gameState.getTileAt(wx, wy));
 
-  // Debug handles for headless QA / console inspection (harmless in production)
-  (window as unknown as Record<string, unknown>).__PIXI_APP__ = app;
-  (window as unknown as Record<string, unknown>).__GAME_DEBUG__ = { tileRenderer, gameState, camera, textureManager };
+  // Debug handles for headless QA / console inspection — DEV only
+  if (import.meta.env.DEV) {
+    (window as unknown as Record<string, unknown>).__PIXI_APP__ = app;
+    (window as unknown as Record<string, unknown>).__GAME_DEBUG__ = { tileRenderer, gameState, camera, textureManager };
+  }
 
   // Entity renderer (players)
   const entityRenderer = new EntityRenderer(worldStage, gameState);
