@@ -1325,4 +1325,69 @@ describe("Core Combat CG-001..CG-027", () => {
     expect(typeof (panel as any).nextTurn).toBe("undefined");
     expect(typeof (panel as any).advanceTurn).toBe("undefined");
   });
+
+  /* ── CSS Fix: Initial Visibility (CSS-FIX-001..006) ── */
+
+  it("CSS-FIX-001: CombatPanel container is hidden before show()", () => {
+    panel = new CombatPanel(parent);
+    const container = (panel as any).container as HTMLElement;
+    expect(container.style.display).toBe("none");
+  });
+
+  it("CSS-FIX-002: show() makes the container visible", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload());
+    const container = (panel as any).container as HTMLElement;
+    expect(container.style.display).toBe("flex");
+  });
+
+  it("CSS-FIX-003: hide() makes the container hidden again", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload());
+    panel.hide();
+    const container = (panel as any).container as HTMLElement;
+    expect(container.style.display).toBe("none");
+  });
+
+  it("CSS-FIX-004: update() does not change container visibility", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload());
+    const container = (panel as any).container as HTMLElement;
+    expect(container.style.display).toBe("flex");
+    panel.update({ round: 2 });
+    expect(container.style.display).toBe("flex");
+  });
+
+  it("CSS-FIX-005: target selection state is preserved across show/update/hide", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload({
+      participants: [
+        makeCombatParticipant({ participantId: "player-1", side: "player" }),
+        makeCombatParticipant({ participantId: "mob-1", side: "enemy" }),
+      ],
+    }));
+    // Enter target mode — auto-selects enemy-0
+    const attackBtn = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    attackBtn.click();
+    const enemyCard = parent.querySelector("[data-participant='enemy-0']") as HTMLElement;
+    expect(enemyCard.getAttribute("data-selected")).toBe("true");
+    // update() should preserve selection while in target mode
+    panel.update({ round: 2 });
+    const enemyCardAfter = parent.querySelector("[data-participant='enemy-0']") as HTMLElement;
+    expect(enemyCardAfter.getAttribute("data-selected")).toBe("true");
+  });
+
+  it("CSS-FIX-006: Attack/Defend/Flee buttons exist and are interactive", () => {
+    panel = new CombatPanel(parent);
+    panel.show(makeCombatPayload());
+    const attack = parent.querySelector("[data-action='attack']") as HTMLButtonElement;
+    const defend = parent.querySelector("[data-action='defend']") as HTMLButtonElement;
+    const flee = parent.querySelector("[data-action='flee']") as HTMLButtonElement;
+    expect(attack).toBeDefined();
+    expect(defend).toBeDefined();
+    expect(flee).toBeDefined();
+    expect(attack.textContent).toBe("Attack");
+    expect(defend.textContent).toBe("Defend");
+    expect(flee.textContent).toBe("Flee");
+  });
 });

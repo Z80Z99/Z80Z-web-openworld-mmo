@@ -45,7 +45,7 @@ export interface CombatPanelLogEntry {
 /* ── Helpers ── */
 
 const S = {
-  overlay: `position:absolute;inset:0;z-index:50;display:none;background:rgba(0,0,0,0.8);font-family:monospace;color:#fff;display:flex;align-items:center;justify-content:center;`,
+  overlay: `position:absolute;inset:0;z-index:50;display:none;background:rgba(0,0,0,0.8);font-family:monospace;color:#fff;align-items:center;justify-content:center;`,
   card: `background:rgba(20,20,30,0.95);border:1px solid #555;border-radius:8px;padding:16px;max-width:500px;width:90%;`,
   header: `display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;`,
   badge: `font-size:11px;font-weight:bold;text-transform:uppercase;padding:2px 8px;border-radius:3px;color:#fff;`,
