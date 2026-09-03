@@ -277,18 +277,25 @@ function normalizeLootDropped(raw: RawCombatEvent): NormalizedLootDropped | null
 /**
  * Builds a ClientBattleState from an encounter_started event.
  * Used for initial battle state creation.
+ *
+ * Includes local player as a participant so BattlePanel renders correctly.
  */
 export function buildBattleStateFromEncounter(
   mobId: string,
   mobPosition: BattlePoint,
   playerPosition: BattlePoint,
+  localPlayerId: string | null,
 ): ClientBattleState {
+  const playerParticipants: ClientBattleParticipant[] = localPlayerId
+    ? [{ id: localPlayerId, position: playerPosition, state: "ACTIVE" }]
+    : [];
+
   return {
     battleId: `battle-${mobId}`,
     playerSide: {
       id: "player",
       leaderId: null,
-      participants: [],
+      participants: playerParticipants,
       area: { center: playerPosition, radius: 0 },
       state: "ACTIVE",
     },
@@ -306,30 +313,63 @@ export function buildBattleStateFromEncounter(
   };
 }
 
+/** Local player info needed for combat participant projection. */
+export interface LocalPlayerInfo {
+  readonly id: string;
+  readonly currentHp: number;
+  readonly maxHp: number;
+}
+
 /**
  * Builds a ClientCombatState from an encounter_started event.
  * Used for initial combat state creation.
+ *
+ * Includes local player as a participant so CombatPanel can detect
+ * "is my turn" and enable action buttons.
  */
 export function buildCombatStateFromEncounter(
   mobId: string,
   combatId: string | null,
   currentActorId: string | null,
+  localPlayer: LocalPlayerInfo | null,
 ): ClientCombatState {
+  const enemyParticipant: ClientCombatParticipant = {
+    participantId: mobId,
+    currentHp: 0,
+    maxHp: 0,
+    alive: true,
+    defending: false,
+    fleeing: false,
+    side: "enemy",
+  };
+
+  const playerParticipant: ClientCombatParticipant | null = localPlayer
+    ? {
+        participantId: localPlayer.id,
+        currentHp: Math.max(0, localPlayer.currentHp),
+        maxHp: Math.max(0, localPlayer.maxHp),
+        alive: localPlayer.currentHp > 0,
+        defending: false,
+        fleeing: false,
+        side: "player",
+      }
+    : null;
+
+  const participants = playerParticipant
+    ? [playerParticipant, enemyParticipant]
+    : [enemyParticipant];
+
+  const turnOrder = playerParticipant
+    ? [playerParticipant.participantId, mobId]
+    : [mobId];
+
   return {
     combatId: combatId ?? `combat-${mobId}`,
     battleId: `battle-${mobId}`,
     state: "ACTIVE",
     round: 1,
     currentActorId: currentActorId ?? mobId,
-    turnOrder: [mobId],
-    participants: [{
-      participantId: mobId,
-      currentHp: 0,
-      maxHp: 0,
-      alive: true,
-      defending: false,
-      fleeing: false,
-      side: "enemy",
-    }],
+    turnOrder,
+    participants,
   };
 }

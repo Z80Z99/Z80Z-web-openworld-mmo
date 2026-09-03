@@ -286,7 +286,7 @@ describe("Multi-Participant", () => {
     gs.updateCombatFromEvent(normalized);
     gs.updateBattleFromEvent(normalized);
 
-    expect(gs.combat!.participants.length).toBe(1);
+    expect(gs.combat!.participants.length).toBe(2);
     expect(gs.combat!.turnOrder.includes("mob1")).toBe(true);
   });
 

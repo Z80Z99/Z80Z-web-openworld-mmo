@@ -110,6 +110,7 @@ describe("Phase 3H.3 — Client Battle/Combat State Model (CSM-001..CSM-020)", (
       "mob-1",
       point(5, 5),
       point(0, 0),
+      null,
     );
 
     expect(battle.battleId).toBe("battle-mob-1");
@@ -127,6 +128,7 @@ describe("Phase 3H.3 — Client Battle/Combat State Model (CSM-001..CSM-020)", (
       "mob-1",
       "combat-123",
       "player-1",
+      null,
     );
 
     expect(combat.combatId).toBe("combat-123");
@@ -371,8 +373,8 @@ describe("Phase 3H.3 — Client Battle/Combat State Model (CSM-001..CSM-020)", (
   /* ── CSM-018: battleId/combatId separation ── */
 
   it("CSM-018: battleId and combatId are separate identifiers", () => {
-    const battle = buildBattleStateFromEncounter("mob-1", point(0, 0), point(5, 5));
-    const combat = buildCombatStateFromEncounter("mob-1", "combat-abc", "player-1");
+    const battle = buildBattleStateFromEncounter("mob-1", point(0, 0), point(5, 5), null);
+    const combat = buildCombatStateFromEncounter("mob-1", "combat-abc", "player-1", null);
 
     expect(battle.battleId).toBe("battle-mob-1");
     expect(combat.battleId).toBe("battle-mob-1");

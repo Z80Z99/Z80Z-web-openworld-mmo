@@ -12,6 +12,7 @@ import { WorldGenerator } from "@mmo/shared";
 import type { ClientBattleState } from "./BattleState.js";
 import type { ClientCombatState } from "./CombatState.js";
 import type { NormalizedCombatEvent } from "../combat/CombatEventNormalizer.js";
+import type { LocalPlayerInfo } from "../combat/CombatEventNormalizer.js";
 import {
   buildCombatStateFromEncounter,
   buildBattleStateFromEncounter,
@@ -103,58 +104,119 @@ export class GameState {
   updateCombatFromEvent(event: NormalizedCombatEvent): void {
     switch (event.type) {
       case "encounter_started": {
+        const localPlayerInfo: LocalPlayerInfo | null = this.localPlayer
+          ? { id: this.localPlayer.id, currentHp: this.localPlayer.health, maxHp: this.localPlayer.maxHealth }
+          : null;
         this.combat = buildCombatStateFromEncounter(
           event.mobId,
           event.combatId,
           event.currentActorId,
+          localPlayerInfo,
         );
         break;
       }
 
       case "damage_dealt": {
         if (!this.combat) break;
-        const updated = this.combat.participants.map((p) => {
-          if (p.participantId === event.targetId) {
-            return { ...p, currentHp: Math.max(0, event.currentHp), alive: event.currentHp > 0 };
-          }
-          return p;
-        });
+        const existing = this.combat.participants.find((p) => p.participantId === event.targetId);
+        let updated;
+        if (existing) {
+          updated = this.combat.participants.map((p) =>
+            p.participantId === event.targetId
+              ? { ...p, currentHp: Math.max(0, event.currentHp), alive: event.currentHp > 0 }
+              : p,
+          );
+        } else {
+          // Upsert: unknown participant — determine side from context
+          const isEnemy = !event.targetId.startsWith(this.localPlayer?.id ?? "___");
+          updated = [...this.combat.participants, {
+            participantId: event.targetId,
+            currentHp: Math.max(0, event.currentHp),
+            maxHp: Math.max(0, event.maxHp ?? 0),
+            alive: event.currentHp > 0,
+            defending: false,
+            fleeing: false,
+            side: isEnemy ? "enemy" as const : "player" as const,
+          }];
+        }
         this.combat = { ...this.combat, participants: updated };
         break;
       }
 
       case "player_damaged": {
         if (!this.combat) break;
-        const updated = this.combat.participants.map((p) => {
-          if (p.participantId === event.targetId) {
-            return { ...p, currentHp: Math.max(0, event.currentHp), alive: event.currentHp > 0 };
-          }
-          return p;
-        });
+        const existing = this.combat.participants.find((p) => p.participantId === event.targetId);
+        let updated;
+        if (existing) {
+          updated = this.combat.participants.map((p) =>
+            p.participantId === event.targetId
+              ? { ...p, currentHp: Math.max(0, event.currentHp), alive: event.currentHp > 0 }
+              : p,
+          );
+        } else {
+          // Upsert: unknown player participant
+          updated = [...this.combat.participants, {
+            participantId: event.targetId,
+            currentHp: Math.max(0, event.currentHp),
+            maxHp: Math.max(0, event.maxHp ?? 0),
+            alive: event.currentHp > 0,
+            defending: false,
+            fleeing: false,
+            side: "player" as const,
+          }];
+        }
         this.combat = { ...this.combat, participants: updated, round: this.combat.round + 1 };
         break;
       }
 
       case "mob_killed": {
         if (!this.combat) break;
-        const updated = this.combat.participants.map((p) => {
-          if (p.participantId === event.targetId) {
-            return { ...p, alive: false, currentHp: 0 };
-          }
-          return p;
-        });
+        const existing = this.combat.participants.find((p) => p.participantId === event.targetId);
+        let updated;
+        if (existing) {
+          updated = this.combat.participants.map((p) =>
+            p.participantId === event.targetId
+              ? { ...p, alive: false, currentHp: 0 }
+              : p,
+          );
+        } else {
+          // Upsert: unknown enemy participant — dead on arrival
+          updated = [...this.combat.participants, {
+            participantId: event.targetId,
+            currentHp: 0,
+            maxHp: 0,
+            alive: false,
+            defending: false,
+            fleeing: false,
+            side: "enemy" as const,
+          }];
+        }
         this.combat = { ...this.combat, participants: updated };
         break;
       }
 
       case "player_died": {
         if (!this.combat) break;
-        const updated = this.combat.participants.map((p) => {
-          if (p.participantId === event.targetId) {
-            return { ...p, alive: false, currentHp: 0 };
-          }
-          return p;
-        });
+        const existing = this.combat.participants.find((p) => p.participantId === event.targetId);
+        let updated;
+        if (existing) {
+          updated = this.combat.participants.map((p) =>
+            p.participantId === event.targetId
+              ? { ...p, alive: false, currentHp: 0 }
+              : p,
+          );
+        } else {
+          // Upsert: unknown player participant — dead on arrival
+          updated = [...this.combat.participants, {
+            participantId: event.targetId,
+            currentHp: 0,
+            maxHp: 0,
+            alive: false,
+            defending: false,
+            fleeing: false,
+            side: "player" as const,
+          }];
+        }
         this.combat = { ...this.combat, participants: updated };
         break;
       }
@@ -207,7 +269,12 @@ export class GameState {
         const playerPos = this.localPlayer
           ? { x: this.localPlayer.x, y: this.localPlayer.y }
           : { x: 0, y: 0 };
-        this.battle = buildBattleStateFromEncounter(event.mobId, mobPos, playerPos);
+        this.battle = buildBattleStateFromEncounter(
+          event.mobId,
+          mobPos,
+          playerPos,
+          this.localPlayer?.id ?? null,
+        );
         break;
       }
 
