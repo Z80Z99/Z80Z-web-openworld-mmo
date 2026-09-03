@@ -47,7 +47,6 @@ export class BattlePanel {
     this.container.style.cssText = `
       position: absolute; inset: 0; z-index: 50; display: none;
       background: rgba(0,0,0,0.8); font-family: monospace; color: #fff;
-      display: flex; align-items: center; justify-content: center;
     `;
     parent.appendChild(this.container);
 
@@ -137,6 +136,8 @@ export class BattlePanel {
 
   show(payload: BattlePanelShowPayload): void {
     this.container.style.display = "flex";
+    this.container.style.alignItems = "center";
+    this.container.style.justifyContent = "center";
     this.render(payload);
   }
 
